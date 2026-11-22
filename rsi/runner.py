@@ -73,7 +73,8 @@ def _write_json(path: Path, obj) -> None:
 
 
 async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg: GameConfig,
-                   out_dir: str | Path, progress: Callable[[str], None] | None = None) -> dict:
+                   out_dir: str | Path, progress: Callable[[str], None] | None = None,
+                   models: dict[str, str] | None = None) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -82,8 +83,10 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
     unknown = set(active) - set(env.powers)
     assert not unknown, f"seating has powers not on map {cfg.map_name}: {unknown}"
     bus, vault, stats = Bus(), Vault(powers=env.powers), GameStats()
-    models = {p: cfg.power_models.get(p) or getattr(getattr(llm, "cfg", None), "model", "mock") for p in active}
-    players = {p: Player(p, seating[p], llm, game_seed=seed, model=cfg.power_models.get(p)) for p in active}
+    chosen = models if models is not None else cfg.power_models
+    default_model = getattr(getattr(llm, "cfg", None), "model", "mock")
+    models = {p: chosen.get(p) or default_model for p in active}
+    players = {p: Player(p, seating[p], llm, game_seed=seed, model=chosen.get(p)) for p in active}
     boards: dict[str, str] = {}
     reasoning: dict[str, dict] = {}       # phase -> power -> private reasoning texts (viewer / causal graph)
     activity: dict[str, str] = {}         # power -> what it is doing right now (live viewer)

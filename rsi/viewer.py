@@ -428,7 +428,10 @@ def _current_game(run_dir: Path) -> str | None:
     return None
 
 
-def serve(run_dir: Path, port: int, gateways: dict[str, str]) -> None:
+WEB_ROOT = Path(__file__).resolve().parents[1] / "web"
+
+
+def serve(run_dir: Path, port: int, gateways: dict[str, str], dev: bool = False) -> None:
     build_index(run_dir)
     lock = threading.Lock()
 
@@ -439,7 +442,44 @@ def serve(run_dir: Path, port: int, gateways: dict[str, str]) -> None:
         def log_message(self, *a):  # quiet
             pass
 
+        def _send(self, status: int, ctype: str, body: bytes) -> None:
+            self.send_response(status)
+            self.send_header("content-type", ctype)
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
+            path = self.path.split("?")[0]
+            # /ui/<app>/...: front-end apps in <repo>/web (served from disk, so edits show on reload)
+            if path == "/ui" or path.startswith("/ui/"):
+                rel = path[len("/ui/"):] or ""
+                target = (WEB_ROOT / rel).resolve()
+                if target.is_dir():
+                    target = target / "index.html"
+                if not target.is_relative_to(WEB_ROOT.resolve()) or not target.exists():
+                    return self._send(404, "text/plain", b"not found")
+                ctype = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
+                         ".svg": "image/svg+xml", ".json": "application/json"}.get(target.suffix, "application/octet-stream")
+                return self._send(200, ctype, target.read_bytes())
+            # /api/x/<name>: extension endpoints in rsi/webapi.py (re-imported per request in --dev mode)
+            if path.startswith("/api/x/"):
+                import importlib
+
+                from rsi import webapi
+                if dev:
+                    importlib.reload(webapi)
+                from urllib.parse import parse_qs, urlparse
+                try:
+                    status, ctype, body = webapi.handle(path[len("/api/x/"):], parse_qs(urlparse(self.path).query),
+                                                        run_dir)
+                except Exception as e:  # noqa: BLE001 - surface backend errors to the UI developer
+                    status, ctype, body = 500, "application/json", json.dumps({"error": repr(e)}).encode()
+                return self._send(status, ctype, body)
+            if path == "/api/standings":
+                from rsi.standings import standings
+                return self._send(200, "application/json", json.dumps(standings(run_dir)).encode())
             if self.path.startswith("/api/rsi") or self.path.startswith("/api/current") or \
                     self.path.split("?")[0] == "/live":
                 cur = _current_game(run_dir)
@@ -467,7 +507,9 @@ def serve(run_dir: Path, port: int, gateways: dict[str, str]) -> None:
                 try:
                     if not (src.resolve().is_relative_to(run_dir.resolve()) and src.name.startswith("game_")):
                         raise FileNotFoundError
-                    body = json.dumps(game_data(json.loads(src.read_text()))).encode()
+                    d = game_data(json.loads(src.read_text()))
+                    d["dir"] = "/" + src.parent.relative_to(run_dir.resolve() if src.is_absolute() else run_dir).as_posix()
+                    body = json.dumps(d).encode()
                     self.send_response(200)
                 except (OSError, ValueError, KeyError):
                     body = b"{}"
@@ -517,12 +559,13 @@ def main() -> None:
     ap.add_argument("run_dir")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--gateway", action="append", default=[], help="name=http://host:port (repeatable)")
+    ap.add_argument("--dev", action="store_true", help="re-import rsi/webapi.py on every /api/x request")
     a = ap.parse_args()
     run_dir = Path(a.run_dir)
     if a.command == "build":
         print(build_index(run_dir))
     else:
-        serve(run_dir, a.port, dict(g.split("=", 1) for g in a.gateway))
+        serve(run_dir, a.port, dict(g.split("=", 1) for g in a.gateway), dev=a.dev)
 
 
 if __name__ == "__main__":

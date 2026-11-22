@@ -29,6 +29,7 @@ from rsi.judge import EvalStore, balance, items_from_game, judge_items
 from rsi.league import League
 from rsi.llm import make_llm
 from rsi.runner import run_game
+from rsi.standings import game_result, short_model, standings
 from rsi.score import apply_temperature, arrays, evaluate, fit_temperature
 
 
@@ -66,14 +67,36 @@ def _progress(msg: str) -> None:
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
 
+_GAME_COUNTER = [0]
+
+
+def models_for_next_game(cfg: Config) -> dict[str, str] | None:
+    """Rotate model_pool across the active powers, one step per game played in this run."""
+    pool = cfg.game.model_pool
+    k = _GAME_COUNTER[0]
+    _GAME_COUNTER[0] += 1
+    if not pool:
+        return None
+    powers = game_powers(cfg.game)
+    return {p: pool[(i + k) % len(pool)] for i, p in enumerate(powers)}
+
+
 async def play_many(specs: list[tuple[str, int, dict[str, Genome]]], llm, cfg: Config, out_dir: Path) -> list[dict]:
     sem = asyncio.Semaphore(cfg.loop.parallel_games)
+    assigned = [models_for_next_game(cfg) for _ in specs]
 
-    async def one(gid, seed, seating):
+    async def one(gid, seed, seating, models):
         async with sem:
-            return await run_game(gid, seed, seating, llm, cfg.game, out_dir, progress=_progress)
+            if models:
+                _progress(f"[{gid}] seats: " + ", ".join(f"{p}={short_model(m)}" for p, m in models.items()))
+            return await run_game(gid, seed, seating, llm, cfg.game, out_dir, progress=_progress, models=models)
 
-    games = await asyncio.gather(*(one(*s) for s in specs))
+    games = await asyncio.gather(*(one(*s, m) for s, m in zip(specs, assigned)))
+    for g in games:
+        r = game_result(g)
+        _progress(f"[{g['game_id']}] WINNER: " + " & ".join(f"{p} ({short_model(m)})" for p, m in
+                                                           zip(r["winners"], r["winner_models"]))
+                  + f" with {r['winner_sc']} SC")
     bad = [g["game_id"] for g in games if g["error"]]
     if bad:
         print(f"  ! {len(bad)} game(s) invalid and excluded: {bad}")
@@ -128,8 +151,18 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
     powers = game_powers(cfg.game)
     gate_games = await play_many([(f"gate{i}", 10_000 + i, {p: v0 for p in powers}) for i in range(lc.gate_games)],
                                  llm, cfg, run_dir / "gate_games")
-    sim_items = balance([it for g in gate_games for it in items_from_game(g, cfg.game.history_window, lc.label_mode)],
-                        lc.sim_gate_truth_ratio, lc.seed)
+    # The judge also reviews the gate games so "promise broken" labels exist for label_mode
+    # promise/either: agents rarely self-label lies, and a gate set without lies cannot measure gains.
+    gate_promises: dict[str, dict[int, str]] = {}
+    if lc.label_mode in ("promise", "either"):
+        st.update("gate review", f"judge reviewing {len(gate_games)} gate game(s) for broken promises")
+        gate_reviews = await asyncio.gather(*(reviewer.review_game(g, v0) for g in gate_games))
+        for g, r in zip(gate_games, gate_reviews):
+            (run_dir / "gate_games" / f"review_{g['game_id']}.json").write_text(r.model_dump_json(indent=2))
+            gate_promises[g["game_id"]] = {gr.msg_id: gr.promise for gr in r.grades}
+    sim_items = balance([it for g in gate_games for it in items_from_game(
+        g, cfg.game.history_window, lc.label_mode, gate_promises.get(g["game_id"]))],
+        lc.sim_gate_truth_ratio, lc.seed)
     n_lies = sum(it.is_lie for it in sim_items)
     print(f"[gate] {len(sim_items)} sim gate items ({n_lies} lies), {len(val_items)} human-val items")
     if n_lies < 10:
@@ -164,6 +197,9 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
             for gid, r in reviews.items():
                 f.write(json.dumps({"game_id": gid, **r.model_dump()}) + "\n")
         leak_flags = sum(gr.leak_flag for r in reviews.values() for gr in r.grades)
+        lb = standings(run_dir)["by_model"]
+        st.update(event="leaderboard: " + ", ".join(f"{r['short']} {r['wins']:g}W/{r['games']}" for r in lb[:6]),
+                  leaderboard=lb)
 
         ranked, rejected = aggregate_diffs(reviews, parent, contamination)
         cands = propose_candidates(parent, ranked, lc.candidates, lc.max_diffs_per_candidate, rng, gen)

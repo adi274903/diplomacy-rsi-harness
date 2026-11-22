@@ -38,6 +38,9 @@ class GameConfig(BaseModel):
     active_powers: list[str] | None = None
     # Optional per-power model override (e.g. a different lab's model per country). Unset = llm.model.
     power_models: dict[str, str] = Field(default_factory=dict)
+    # Rotate these models across the active powers every game (game k: power i plays
+    # model_pool[(i + k) % len]), so no model is tied to one country. Overrides power_models.
+    model_pool: list[str] = Field(default_factory=list)
     press_rounds: int = 2
     max_messages_per_round: int = 2
     end_year: int = 1906

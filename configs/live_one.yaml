@@ -26,12 +26,13 @@ reviewer_llm:
 game:
   map_name: standard
   active_powers: [AUSTRIA, FRANCE, GERMANY, ITALY]
-  power_models:
-    AUSTRIA: thinkingmachines/inkling-2-mini
-    FRANCE: anthropic/claude-haiku-5.5
-    GERMANY: deepseek/deepseek-v4.1-flash
-    ITALY: mistralai/mistral-small-2603
-  end_year: 1903
+  # rotated across the 4 countries every game, so no model is tied to a country
+  model_pool:
+    - thinkingmachines/inkling-2-mini
+    - anthropic/claude-haiku-5.5
+    - deepseek/deepseek-v4.1-flash
+    - mistralai/mistral-small-2603
+  end_year: 1904
   press_rounds: 2
   max_messages_per_round: 2
   stream_events: true
@@ -39,8 +40,9 @@ loop:
   generations: 8
   games_per_generation: 1
   parallel_games: 1
-  gate_games: 1
+  gate_games: 2
   candidates: 2
   patience: 8
   frozen_share: 0.0
+  label_mode: either      # lie = self-labelled deceptive OR the judge found the promise broken
   sim_gate_truth_ratio: 6
