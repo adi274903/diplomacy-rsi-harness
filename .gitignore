@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Rust
+target/
+*.so
+
+# Data, runs, secrets
+data/raw/
+runs/
+*.cache.bin
+.env

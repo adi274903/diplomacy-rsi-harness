@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "rsi-core"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Rust hot paths for the Diplomacy RSI harness"
+
+[tool.maturin]
+features = ["python"]
+module-name = "rsi_core"
