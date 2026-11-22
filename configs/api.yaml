@@ -1,0 +1,35 @@
+# Players: Inkling 2 Mini through a hosted API, fronted by rsi-gateway on :9000.
+# Reviewer: ideally a stronger model from a different family (less self-preference bias),
+# fronted by a second rsi-gateway on :9001 so its cache and budget are tracked separately.
+# No weights are trained: all learning happens in the playbook/genome.
+llm:
+  backend: http
+  base_url: http://127.0.0.1:9000/v1
+  model: inkling-2-mini            # set to your provider's model id
+  api_key_env: RSI_API_KEY         # only needed if the gateway itself requires a key
+  max_connections: 128
+  effort_mode: top                 # check what your provider accepts: top | kwargs | both | none
+  json_mode: json_schema           # fall back to json_object or none if unsupported
+reviewer_llm:
+  backend: http
+  base_url: http://127.0.0.1:9001/v1
+  model: REVIEWER_MODEL_ID         # set to the reviewer model id
+  max_connections: 32
+  effort_mode: none
+  json_mode: none                  # parse + validate + one repair retry
+reviewer_effort: high
+game:
+  end_year: 1906
+  press_rounds: 2
+  max_messages_per_round: 2
+  history_window: 12
+loop:
+  generations: 4
+  games_per_generation: 12
+  parallel_games: 12
+  gate_games: 6
+  candidates: 3
+  max_diffs_per_candidate: 3
+  patience: 2
+  p_gain_min: 0.8
+  label_mode: intent

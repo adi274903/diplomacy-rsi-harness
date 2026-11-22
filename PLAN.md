@@ -1,186 +1,98 @@
-# Plan: Self-Play RSI Harness for Reasoning-Traced Trust Decisions in Diplomacy (6-hour sprint)
+# Plan: Self-Play RSI Harness for Reasoning-Traced Trust Decisions in Diplomacy
 
 ## Context
-The goal is a harness where **several instances of the same agent** (Thinking Machines **Inkling 2 Mini**, cloud-served) **play live Diplomacy games** against each other. Each message they send carries reasoning traces and private truth/lie annotations.
+Several instances of the same agent play live Diplomacy games against each other: Thinking Machines **Inkling 2 Mini**, called through a **hosted API**. Every message carries:
+- a reasoning trace
+- a private truth/lie annotation from the sender
+- a trust judgment from the receiver
 
-A separate **reviewer** agent with privileged access to everything judges the agents' trust decisions and reasoning. It then drives recursive self-improvement in two stages:
-1. **Stage 1:** playbook/prompt evolution.
-2. **Stage 2:** distilling traces into LoRA weights.
+A separate **reviewer** (ideally a stronger model from a different family, also via API) sees everything. It grades the trust decisions and proposes playbook edits.
 
-The **human dataset** (Peskov et al., ACL 2020, "It Takes Two to Lie") is used only as an uncontaminated external benchmark for transfer. It never feeds training. The plan also enforces **no contamination**:
-- between players (hidden information)
-- between games
-- between self-play data and the human eval set
-- from Inkling's pretraining (the dataset has been public since 2020)
+**Self-improvement happens only at the playbook/prompt level.** No weights are trained: no LoRA, STaR or RL.
 
-This plan replaces the BERT-only plan in `.pi/plan/6-hour-...md`.
+The **human dataset** (Peskov et al., ACL 2020, "It Takes Two to Lie") is used only as an uncontaminated external benchmark.
 
 ## Architecture
 ```
-                ┌──────────── Genome store (versioned prompt+playbook+exemplars, hashed) ───────────┐
-                ▼                                                                                   │
-League scheduler ─► Game runner × G (parallel)                                                      │
-                     │  diplomacy engine (adjudication, board state)                                 │
-                     │  7 × Player agent (Inkling 2 Mini, same genome or league mix)                │
-                     │     each sees ONLY its own observation: board, its own inbox/outbox, its own memory│
-                     │  Message bus (private bilateral channels, N press rounds per phase)            │
-                     │  Private vault: sender intent label + committed plan (never routed to players) │
-                     ▼                                                                               │
-              Game log (Peskov-compatible jsonl + extra fields) ─► Reviewer agent (privileged view)  │
-                                                                     ├ grades trust decisions vs ground truth
-                                                                     ├ grades reasoning, flags leakage/cheating
-                                                                     └ proposes playbook diffs ──► Gate ┘
-                                                                                  (self-play gate games
-                                                                                   + human-data val transfer)
+Genome store (system prompt + playbook + exemplars + effort + threshold, content-hashed)
+   │
+League ─► Game runner × G (asyncio)  ──► rsi-gateway :9000 ──► player model API (Inkling 2 Mini)
+            diplomacy engine (MILA adjudicator)
+            7 players, each sees ONLY its own view (board, own dialogs, own memory)
+            Private vault: intent labels, plans at send time, analysis, memory, traces
+            Leak guard (Rust Aho-Corasick) scans every player prompt before it is sent
+   │
+Game record (privileged) + Peskov-compatible dialogs
+   │
+Reviewer ──► rsi-gateway :9001 ──► reviewer model API
+   │  grades (promise kept?, reasoning quality, leak flags) + ≤3 playbook diffs per game
+   ▼
+Evolve: lint diffs → vote/dedupe → candidates (top diffs, random subsets, mined exemplars, higher effort)
+   │
+Gate: (1) self-play replay gate, paired cluster bootstrap on AUPRC (p_gain ≥ 0.8) and ECE (≤ +0.02)
+      (2) human-val transfer: AUPRC must not drop > 0.01
+   │
+Accepted → new incumbent, old one frozen into the league; Pareto front over (AUPRC, −ECE) picks the next parent
 ```
 
-## 1. Game environment
-- **Engine:** the open-source `diplomacy` Python package (MILA adjudicator, standard map). Check in H0 that it installs on Python 3.12. If not, use a Python 3.10 `uv` venv.
-- **Wrapper:** `env/game.py` implements this phase loop:
-  1. Observe.
-  2. Run R=2 press rounds. In each round every power may send ≤ 2 bilateral messages.
-  3. Orders.
-  4. Adjudicate.
-- **Game length:** truncate at the end of 1906 (about 12 phases), score by supply centres, and record outcomes per power. A full game is too long for a 6-hour budget.
-- **Per message sent, the sender's turn writes:**
-  - The message text.
-  - A **private intent label** (truthful/deceptive), matching the dataset's sender label.
-  - A **private committed plan**: the orders it currently intends, locked into the vault before the message goes out.
-  - Its reasoning trace.
-- **Per message received, the receiver's turn writes (the decision being improved):**
-  - A trust decision, `p_lie`, and a reasoning trace. These mirror the dataset's receiver label.
-- **Objective ground truth on top of the self-reported label:** the reviewer checks each promise against the orders actually submitted (whether the promise was kept or broken). That gives two label sources: intent and outcome. This removes some of the self-report noise the human dataset suffers from.
-- **Log format:** game logs use the **same schema as the Peskov jsonl** (messages, sender_labels, receiver_labels, speakers, receivers, indices, seasons, years, game_score, game_score_delta, players, game_id). Extra fields: `private_plan`, `orders`, `promise_kept`, `traces`, `review`. One scorer then works on both self-play and human data.
+## Why the gateway stays (API mode)
+- **Response cache.** Requests are keyed by blake3, so reruns and replays with the same seeds cost nothing.
+- **Spend cap.** A USD budget, priced per million tokens, with per-run accounting.
+- **Rate limits.** 429s are retried while honouring `Retry-After`, and `--max-inflight` matches the provider's rate limit.
+- **Priority.** Game turns (sequential, latency-bound) go ahead of bulk eval sweeps.
+- **Benchmarking.** `rsi-gateway bench` measures what the provider sustains at each concurrency level, which tells you what to set `--max-inflight` to.
 
-## 2. Agent instances and isolation
-- **One stateless agent per power per game.** The context is rebuilt each call from that power's observation only:
-  - board
-  - its own past messages
-  - its own scratch memory for this game
-- Fresh instances for every game. Nothing carries over between games **except the versioned genome** (the only intended learning channel).
-- **The orchestrator enforces information hiding.** The vault, other powers' traces and labels, and reviewer output are never put into a player prompt.
-- A unit test renders every player prompt in a game and asserts that no vault and no foreign-trace strings appear.
-- **League:** each game seats a mix of the current genome, the best previous genomes (frozen snapshots) and v0. This avoids self-play collapse, where agents only learn to read their own clones.
-- **Seating:** each power's genome is assigned at random per game with a fixed seed.
+## Data and evaluation protocol
+- **Self-play gate set:** frozen gate games (v0 in every seat, seeds 10000+, never used for training). Receiver-seat replays are judged by the candidate and the incumbent on identical items, so the comparison is paired. The bootstrap resamples whole dialogs.
+- **Human data** (`DenisPeskoff/2020_acl_diplomacy`, split by game):
+  - **train:** baseline and reviewer validation only
+  - **validation:** transfer gate, plus fitting the calibration temperature
+  - **test:** run once (`TEST_LOCK`), on both the original and a paraphrased version
+- **Label quirks handled in code:**
+  - A lie is `sender_labels == false`.
+  - `"NOANNOTATION"` is dropped for the suspected-lie task.
+  - Scores and years are cast from strings.
+- **Labels for self-play:**
+  - `intent` (default): the sender's private label
+  - `promise`: the reviewer judged the promise broken
+  - `either`: the union of the two
 
-## 3. Reviewer
-- **Separate role** with its own prompt, run at high reasoning effort. Ideally use a different model family from the players to reduce self-preference bias. If Inkling is the only option, use an Inkling instance with a different prompt and seed, and state the bias as a limitation.
-- **Inputs:** the full game log including the vault, orders and promise outcomes.
-- **Outputs (per game):**
-  - (a) a correctness label for each receiver decision
-  - (b) a reasoning-quality rubric score (uses the available evidence, no invented facts, calibrated language)
-  - (c) **cheating/leakage flags**, e.g. a trace that cites information the player could not have seen
-  - (d) up to 3 game-agnostic playbook diffs, each citing the decisions that motivated it
-- **Reviewer validation (H1):** run the reviewer on **human val** dialogs with labels hidden. Measure its agreement with the human sender labels before trusting it as a judge, and report that agreement.
-
-## 4. RSI loop
-**Stage 1 (playbook evolution, about 4 generations):**
-1. Play G≈12 truncated games in parallel with the league.
-2. The reviewer reviews every game.
-3. Aggregate the diffs.
-4. A **lint step** rejects diffs that contain game IDs, quoted message text or long n-gram overlap with any human data.
-5. Build 3 candidate genomes.
-
-**Gate.** A candidate is accepted only if both conditions hold:
-1. **Self-play gate:** 6 fixed-seed games against *frozen* v0 and best-so-far opponents (never used in training). Receiver AUPRC and ECE are measured against vault labels, and a paired bootstrap must show a gain in ≥ 80% of resamples.
-2. **Transfer check:** human **val** game ACTUAL_LIE AUPRC must not drop by more than 0.01. This guards against learning sim-only tells.
-
-Secondary metric: supply-centre outcome against frozen opponents (TrueSkill). It is tracked but is not a gate, so the optimization stays aimed at detection rather than winning.
-
-**Stage 2 (weights, time-boxed):**
-1. Mine the receiver traces that are correct and confident from self-play games only. Balance lies against truths at about 1:2.
-2. LoRA SFT on Inkling, **if** the provider or Tinker supports this 2-day-old MoE/looped architecture. Check in H0.
-3. Fallback: an exemplar bank of self-play traces retrieved with the cached `bge-base-en-v1.5`.
-4. Send the result through the same gate.
-
-## 5. Contamination controls
+## Contamination controls
 | Risk | Control |
 |---|---|
-| Hidden info leaks between players | Per-player context assembly. Vault isolation. Prompt-render test. Reviewer flags traces that cite unseeable facts |
-| Leakage across games | Fresh instances each game. Genome is the only carry-over. Reviewer output never enters a player context |
-| Gate overfitting | Gate seeds and frozen opponents are disjoint from training games. Gate log is append-only |
-| Self-play data → human eval | Human data is never in playbooks, exemplars or SFT. MinHash/8-gram dedup of all training text against human val/test. Test run exactly once |
-| Inkling pretraining memorization of the public dataset | **Memorization probe** on human test: (1) prefix→verbatim continuation rate; (2) label prediction from the message alone, with no context. **Paraphrase check:** score the original against an LLM-paraphrased test set. A large gap means contaminated, so report results on the paraphrased set |
-| Reviewer bias | Validate on human val labels. Different model or prompt from the players. Spot-check 20 reviews by hand |
+| Hidden info between players | Per-player views. Structural check (only own dialogs). Rust leak guard on every prompt. Reviewer `leak_flag`. A game with a leak is invalid and excluded |
+| Across games | Fresh players per game; the genome is the only carry-over. Reviewer output never enters a player prompt |
+| Human data into training | 8-gram index over human val+test. Every diff and exemplar is linted against it. Test set run once |
+| Pretraining memorisation (dataset public since 2020) | Verbatim-continuation probe; paraphrased-test score reported alongside |
+| Gate overfitting | Gate seeds and opponents disjoint from training games; append-only gate log |
+| Reviewer bias | Different model family recommended; agreement with human labels reported |
 
-## 6. Human dataset handling (benchmark only)
-- **Source:** `github.com/DenisPeskoff/2020_acl_diplomacy` `data/{train,validation,test}.jsonl` (CC-BY-4.0), split by game, `game_id` 1–12.
-- **Gotchas:**
-  - **A lie is `sender_labels == false`.**
-  - `receiver_labels` contains `"NOANNOTATION"`.
-  - Scores and years are strings.
-  - The README says `score_delta`, but the data uses `game_score_delta`.
-  - Do not use `singlemessage_format.py`, which shuffles away context.
-- **Roles of each split:**
-  - Human **train**: v0 baseline only, plus reviewer validation.
-  - Human **val**: transfer gate.
-  - Human **test**: final evaluation, run once, on both the original and paraphrased versions.
-- Compute the real stats in H0 and take the paper's baselines from the PDF via `pdftotext`.
-
-## 7. Infrastructure
-- **Env:** `uv` venv with `diplomacy`, `openai`, `pydantic`, `tenacity`, `duckdb`, `pandas`, `scikit-learn`, `scipy`, `datasketch` (MinHash), `trueskill`, `pyyaml` and `matplotlib`. No local torch.
-- **Serving:** an OpenAI-compatible cloud endpoint for Inkling 2 Mini (vLLM on 1×H100/A100-80GB, or the provider's API), configured via `.env` (`BASE_URL`, `MODEL`, `API_KEY`, `REVIEWER_MODEL`).
-- **Client:** async with a semaphore (about 64 concurrent requests), retries, strict JSON-schema output, and a DuckDB cache keyed by (prompt hash, model, effort, seed).
-- **Per-run budget:** a hard cap on token spend and a dashboard line per generation.
-- **Estimated load:** about 7 powers × (2 press rounds × 2 messages + receiver judgments + orders) ≈ 50 calls per phase. That is about 600 calls per game and about 7k calls per generation, which is feasible with 3.4B active parameters on one GPU.
-- **Storage:**
-  - `runs/<run_id>/gen_<k>/games/*.jsonl`
-  - `reviews.jsonl`
-  - `genomes/`
-  - `gate_log.jsonl`
-  - `metrics.jsonl`
-  - `traces.parquet`
-
-## Files to create (`/home/adi274903/Documents/Strategic_Decision_Making`)
+## Code map
 ```
-rsi/env/game.py         diplomacy wrapper, phase loop, truncation, scoring
-rsi/env/bus.py          private bilateral message bus, press rounds
-rsi/env/vault.py        private intents/plans/orders, promise-kept checker
-rsi/agents/player.py    observation→prompt, send/receive/orders turns (JSON schema)
-rsi/agents/reviewer.py  privileged review, rubric, leakage flags, diffs
-rsi/genome.py           genome model, hashing, diff apply, lint
-rsi/llm.py              async client, cache, budget
-rsi/league.py           seating, frozen snapshots, TrueSkill
-rsi/gate.py             self-play gate + human-val transfer gate, bootstrap
-rsi/contamination.py    MinHash dedup, memorization probe, paraphrase set
-rsi/human_data.py       download, flatten, leakage asserts, human-data rollout
-rsi/score.py            AUPRC, Lie-F1, macro-F1, ECE, Brier, reweighting
-rsi/star.py             Stage 2 trace mining → LoRA SFT or exemplar bank
-rsi/loop.py             generations orchestration (python -m rsi.loop --config configs/sprint.yaml)
-rsi/report.py           results.md, reliability plots, gate history, playbook diff history
-tests/test_isolation.py, tests/test_leakage.py, tests/test_score.py, tests/test_game_smoke.py
+crates/rsi-core      Rust (PyO3): weighted metrics = sklearn, paired cluster bootstrap, n-gram index, leak guard
+crates/rsi-gateway   Rust: API gateway (cache, budget, Retry-After, priority, metrics) + bench
+rsi/env/             game.py (engine wrapper), bus.py (bilateral messages), vault.py (private state + isolation)
+rsi/agents/          player.py (send/judge/orders + mock policies), reviewer.py (privileged review)
+rsi/genome.py        genome, diffs, lint          rsi/evolve.py    candidates, exemplar mining, Pareto front
+rsi/runner.py        one self-play game           rsi/judge.py     receiver-seat items, eval cache
+rsi/human_data.py    benchmark loader             rsi/score.py     metrics, calibration
+rsi/gate.py          acceptance gate              rsi/league.py    seating, ratings
+rsi/contamination.py dedup, memorisation, paraphrase   rsi/loop.py  CLI      rsi/report.py  results.md
 ```
-
-## 6-hour schedule
-| Time | Work |
-|---|---|
-| 0–1 | Env, endpoint, check `diplomacy` install and LoRA support. Human data and its stats. Memorization/paraphrase probe started in the background |
-| 1–2 | Game wrapper, bus, vault, player agent. Smoke game with 7 × v0 to 1902. Isolation tests. Reviewer, validated on human val |
-| 2–2.5 | v0 baselines: human val/test-paraphrase (test held back), self-play gate games |
-| 2.5–4.5 | Stage 1: about 4 generations (12 games each, then review, diffs, gate) |
-| 4.5–5.25 | Stage 2: trace mining, then LoRA or the exemplar bank, then gate |
-| 5.25–6 | Final genome, calibration on human val, **human test once** (original + paraphrased), report |
 
 ## Verification
 - `pytest`:
-  - Rendered player prompts contain no vault text and no foreign traces.
-  - No human game appears in two roles.
-  - Context indices are lower than the target index.
-  - The metric functions match sklearn.
-  - A smoke game reaches 1902 with legal orders.
-- **Determinism:** rerunning a game from cache with the same seed reproduces an identical log.
-- **Gate sanity:**
-  - A harmful diff ("always trust") is rejected.
-  - A no-op genome's bootstrap delta is centred near 0.
-- **Reviewer:** agreement with human val labels is reported. 20 reviews are checked by hand.
-- **Contamination report:**
-  - Memorization rates.
-  - Original-vs-paraphrased gap.
-  - Dedup hits, which must be 0.
-- **`results.md`** contains:
-  - v0 against the final genome on self-play gate games and human test (original and paraphrased), with 95% CIs, set against the paper baselines.
-  - Calibration before and after.
-  - Trust over-trust and under-trust tables.
-  - League TrueSkill.
-  - Playbook diff history.
-  - Limitations: few lies; self-report labels; sim-to-human gap; reviewer bias; deception skills stay confined to the sandbox and are not exported.
+  - metrics match sklearn, and Rust matches Python
+  - genome diffs and lint behave as specified
+  - a mock self-play game runs with zero leaks and produces Peskov-shaped logs
+  - the human-data loader handles the label quirks and reweights balanced subsets correctly
+- `python -m rsi.loop smoke --config configs/mock.yaml` runs one full game with no model.
+- `python -m rsi.loop run --config configs/mock.yaml --mock` runs the whole loop end to end.
+- **Real runs:** start `scripts/gateways.sh`, then run `smoke` against the API, then `run`, then `final-test` (once), then `report`.
+
+## Limitations
+- Few lies per split, so confidence intervals are wide.
+- Labels are self-reported.
+- Gap between the simulation and human play.
+- Reviewer bias.
+- Deception skills stay in the sandbox.

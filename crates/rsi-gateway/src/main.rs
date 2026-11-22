@@ -1,11 +1,12 @@
 //! rsi-gateway: the single OpenAI-compatible endpoint the harness talks to.
 //!
 //! ```text
-//! harness (many async calls) ──► rsi-gateway ──► vLLM / SGLang replicas (H100)
+//! harness (many async calls) ──► rsi-gateway ──► hosted model API(s) (or any OpenAI-compatible engine)
 //!                                  │ priority admission (game turns before bulk eval)
+//!                                  │ concurrency cap matched to the provider's rate limit
 //!                                  │ content-addressed response cache (replayable runs)
-//!                                  │ prefix-affinity routing (keeps the engine's prefix-cache hot)
-//!                                  │ retries with backoff, token budget, per-run accounting
+//!                                  │ prefix-affinity routing across upstreams (keeps prefix caches hot)
+//!                                  │ retries honouring Retry-After, token + USD budget, per-run accounting
 //!                                  └ /stats (JSON), /metrics (Prometheus)
 //! ```
 //!
@@ -57,13 +58,14 @@ enum Cmd {
 struct ServeArgs {
     #[arg(long, env = "RSI_LISTEN", default_value = "0.0.0.0:9000")]
     listen: SocketAddr,
-    /// Engine base URLs (without /v1), comma separated, e.g. http://127.0.0.1:8000
+    /// OpenAI-compatible base URLs INCLUDING the version path, comma separated,
+    /// e.g. https://api.provider.example/v1 or http://127.0.0.1:8000/v1
     #[arg(long, env = "RSI_UPSTREAMS", value_delimiter = ',', required = true)]
     upstream: Vec<String>,
-    /// Bearer token sent to the engines, if they require one.
+    /// Bearer token sent upstream (the provider API key).
     #[arg(long, env = "UPSTREAM_API_KEY")]
     upstream_api_key: Option<String>,
-    /// Max requests in flight to the engines (summed over replicas).
+    /// Max requests in flight upstream (set to what the provider's rate limit sustains).
     #[arg(long, env = "RSI_MAX_INFLIGHT", default_value_t = 256)]
     max_inflight: usize,
     /// Response cache file; omit to disable caching.
@@ -75,12 +77,22 @@ struct ServeArgs {
     /// Hard cap on prompt+completion tokens across the gateway's lifetime (0 = unlimited).
     #[arg(long, env = "RSI_TOKEN_BUDGET", default_value_t = 0)]
     token_budget: u64,
+    /// Price per million prompt tokens (USD) for cost tracking; cached prompt tokens use --usd-per-mtok-cached.
+    #[arg(long, env = "RSI_USD_PER_MTOK_IN", default_value_t = 0.0)]
+    usd_per_mtok_in: f64,
+    #[arg(long, env = "RSI_USD_PER_MTOK_CACHED", default_value_t = 0.0)]
+    usd_per_mtok_cached: f64,
+    #[arg(long, env = "RSI_USD_PER_MTOK_OUT", default_value_t = 0.0)]
+    usd_per_mtok_out: f64,
+    /// Hard cap on estimated spend in USD (0 = unlimited).
+    #[arg(long, env = "RSI_USD_BUDGET", default_value_t = 0.0)]
+    usd_budget: f64,
     #[arg(long, default_value_t = 3)]
     retries: u32,
     /// Per-request timeout for non-streaming calls.
     #[arg(long, default_value_t = 900)]
     timeout_s: u64,
-    /// How many more in-flight requests the affine replica may carry than the least-loaded one
+    /// How many more in-flight requests the affine upstream may carry than the least-loaded one
     /// before we give up on prefix affinity.
     #[arg(long, default_value_t = 16)]
     affinity_slack: usize,
@@ -108,6 +120,7 @@ impl Drop for InflightGuard {
 
 struct App {
     client: reqwest::Client,
+    prices: stats::Prices,
     upstreams: Vec<Arc<Upstream>>,
     adm: Arc<Admission>,
     cache: Cache,
@@ -169,19 +182,29 @@ fn retryable(s: StatusCode) -> bool {
     s == StatusCode::TOO_MANY_REQUESTS || s.is_server_error()
 }
 
-async fn backoff(attempt: u32) {
-    let base = 250u64 << attempt.min(6);
+/// Exponential backoff with jitter, or the provider's Retry-After if it asks for longer (capped).
+async fn backoff(attempt: u32, retry_after: Option<Duration>) {
+    let base = 500u64 << attempt.min(6);
     let jitter = (std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0)
-        % 100) as u64;
-    tokio::time::sleep(Duration::from_millis(base + jitter)).await;
+        % 250) as u64;
+    let mut wait = Duration::from_millis(base + jitter);
+    if let Some(ra) = retry_after {
+        wait = wait.max(ra.min(Duration::from_secs(120)));
+    }
+    tokio::time::sleep(wait).await;
+}
+
+fn retry_after(h: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let v = h.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    v.trim().parse::<f64>().ok().filter(|s| *s >= 0.0).map(Duration::from_secs_f64)
 }
 
 enum Step {
     Done(Response),
-    Retry(String),
+    Retry(String, Option<Duration>),
 }
 
 async fn chat(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> Response {
@@ -211,6 +234,10 @@ async fn chat(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> R
         app.stats.budget_rejects.fetch_add(1, Relaxed);
         return error(StatusCode::TOO_MANY_REQUESTS, "budget_exhausted", "gateway token budget exhausted");
     }
+    if app.cfg.usd_budget > 0.0 && app.stats.cost_usd(&app.prices) >= app.cfg.usd_budget {
+        app.stats.budget_rejects.fetch_add(1, Relaxed);
+        return error(StatusCode::TOO_MANY_REQUESTS, "budget_exhausted", "gateway USD budget exhausted");
+    }
 
     let waited = Instant::now();
     let permit: Permit = app.adm.acquire(prio).await;
@@ -223,7 +250,7 @@ async fn chat(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> R
         let guard = InflightGuard::new(up.clone());
         let mut req = app
             .client
-            .post(format!("{}/v1/chat/completions", up.url))
+            .post(format!("{}/chat/completions", up.url))
             .header(header::CONTENT_TYPE, "application/json")
             .body(body.clone());
         if let Some(k) = &app.cfg.upstream_api_key {
@@ -234,7 +261,7 @@ async fn chat(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> R
         }
 
         let step = match req.send().await {
-            Err(e) => Step::Retry(format!("send: {e}")),
+            Err(e) => Step::Retry(format!("send: {e}"), None),
             Ok(resp) => {
                 let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
                 if status.is_success() && stream {
@@ -258,11 +285,12 @@ async fn chat(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> R
                             }
                             Step::Done(json_response(status, bytes, if key.is_some() { "miss" } else { "off" }))
                         }
-                        Err(e) => Step::Retry(format!("read body: {e}")),
+                        Err(e) => Step::Retry(format!("read body: {e}"), None),
                     }
                 } else if retryable(status) {
+                    let ra = retry_after(resp.headers());
                     let text = resp.text().await.unwrap_or_default();
-                    Step::Retry(format!("{status}: {}", text.chars().take(300).collect::<String>()))
+                    Step::Retry(format!("{status}: {}", text.chars().take(300).collect::<String>()), ra)
                 } else {
                     // Client errors (bad schema, context overflow) are not retried.
                     app.stats.upstream_errors.fetch_add(1, Relaxed);
@@ -278,13 +306,13 @@ async fn chat(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> R
                 app.stats.record_latency(prio, t0.elapsed());
                 return r;
             }
-            Step::Retry(why) if attempt < app.cfg.retries => {
+            Step::Retry(why, ra) if attempt < app.cfg.retries => {
                 app.stats.retries.fetch_add(1, Relaxed);
                 tracing::warn!(attempt, upstream = %up.url, %why, "retrying");
-                backoff(attempt).await;
+                backoff(attempt, ra).await;
                 attempt += 1;
             }
-            Step::Retry(why) => {
+            Step::Retry(why, _) => {
                 app.stats.upstream_errors.fetch_add(1, Relaxed);
                 app.stats.record_latency(prio, t0.elapsed());
                 return error(StatusCode::BAD_GATEWAY, "upstream_failed", why);
@@ -295,7 +323,7 @@ async fn chat(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> R
 
 async fn models(State(app): State<Arc<App>>) -> Response {
     let up = &app.upstreams[0];
-    let mut req = app.client.get(format!("{}/v1/models", up.url)).timeout(Duration::from_secs(10));
+    let mut req = app.client.get(format!("{}/models", up.url)).timeout(Duration::from_secs(10));
     if let Some(k) = &app.cfg.upstream_api_key {
         req = req.bearer_auth(k);
     }
@@ -312,10 +340,12 @@ async fn health(State(app): State<Arc<App>>) -> Response {
     let mut out = Vec::new();
     let mut all_ok = true;
     for u in &app.upstreams {
-        let ok = app
-            .client
-            .get(format!("{}/health", u.url))
-            .timeout(Duration::from_secs(3))
+        // Hosted APIs have no /health; a successful /models call means reachable + authorised.
+        let mut req = app.client.get(format!("{}/models", u.url)).timeout(Duration::from_secs(5));
+        if let Some(k) = &app.cfg.upstream_api_key {
+            req = req.bearer_auth(k);
+        }
+        let ok = req
             .send()
             .await
             .map(|r| r.status().is_success())
@@ -328,7 +358,9 @@ async fn health(State(app): State<Arc<App>>) -> Response {
 }
 
 async fn stats_json(State(app): State<Arc<App>>) -> Response {
-    axum::Json(app.stats.to_json(app.adm.snapshot(), app.cache.len())).into_response()
+    let mut v = app.stats.to_json(app.adm.snapshot(), app.cache.len());
+    v["est_cost_usd"] = serde_json::json!(app.stats.cost_usd(&app.prices));
+    axum::Json(v).into_response()
 }
 
 async fn metrics_text(State(app): State<Arc<App>>) -> Response {
@@ -354,8 +386,14 @@ async fn serve(cfg: ServeArgs) -> anyhow::Result<()> {
         .iter()
         .map(|u| Arc::new(Upstream { url: u.trim_end_matches('/').to_string(), inflight: AtomicUsize::new(0) }))
         .collect();
+    let prices = stats::Prices {
+        input: cfg.usd_per_mtok_in,
+        cached: cfg.usd_per_mtok_cached,
+        output: cfg.usd_per_mtok_out,
+    };
     let app = Arc::new(App {
         client,
+        prices,
         upstreams,
         adm: Admission::new(cfg.max_inflight),
         cache,

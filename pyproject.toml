@@ -1,0 +1,31 @@
+[project]
+name = "diplomacy-rsi"
+version = "0.1.0"
+description = "Self-play RSI harness for reasoning-traced trust decisions in Diplomacy"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "diplomacy>=1.2",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pyyaml>=6",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Rust hot paths (metrics/bootstrap, n-gram index, leak guard). Pure-Python fallback is used if absent.
+fast = ["rsi-core"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "scikit-learn>=1.4", "maturin>=1.7"]
+
+[tool.uv.sources]
+rsi-core = { path = "crates/rsi-core" }
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["rsi*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

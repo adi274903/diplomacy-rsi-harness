@@ -1,34 +1,57 @@
 # Diplomacy RSI Harness
 
-Self-play recursive-self-improvement harness for reasoning-traced trust decisions in Diplomacy.
-Several copies of Thinking Machines' Inkling 2 Mini play Diplomacy against each other. A privileged reviewer grades their trust decisions and evolves their playbook. The human deception dataset from Peskov et al. (ACL 2020) is used only for evaluation.
+A harness for recursive self-improvement on reasoning-traced trust decisions in Diplomacy:
+- **Players:** several copies of Thinking Machines' Inkling 2 Mini, called through a hosted API, play Diplomacy against each other.
+- **Reviewer:** sees everything, grades the players' trust decisions, and proposes changes to their **playbook**.
+- **Learning:** happens only at the prompt/playbook level. No model weights are trained.
+- **Benchmark:** the human deception dataset (Peskov et al., ACL 2020) is used only for evaluation.
 
-See [PLAN.md](PLAN.md) for the design.
+See [PLAN.md](PLAN.md) for the design and the contamination controls.
 
-## Status (work in progress)
-- `crates/rsi-core`: Rust hot paths exposed to Python through PyO3: weighted metrics with a paired cluster bootstrap, an n-gram contamination index, and an Aho-Corasick prompt leak guard. Written but not yet compiled or tested.
-- `crates/rsi-gateway`: low-latency OpenAI-compatible gateway in front of vLLM/SGLang. Written but not yet compiled or tested.
-- Planned next: the Python orchestrator (`rsi/`) and serving scripts for the H100 (Autolab) and Colab.
+> **Status:** all code is written but has **not yet been compiled or run**. Expect a round of fixes on the first `cargo test` / `pytest`.
 
-## rsi-gateway
+## Quickstart
 
+```bash
+# 1. Python env (Python 3.10–3.13)
+uv venv --python 3.12 .venv && uv pip install -e ".[dev]"
+# optional: build the Rust hot paths (pure-Python fallback otherwise)
+uv pip install -e crates/rsi-core
+
+# 2. Tests + a full game with no model
+pytest
+python -m rsi.loop smoke --config configs/mock.yaml
+python -m rsi.loop run   --config configs/mock.yaml --run-name mock1
+
+# 3. Real run against hosted APIs
+cp .env.example .env            # fill in provider URLs, keys, prices, budgets
+scripts/gateways.sh             # player gateway :9000, reviewer gateway :9001
+python -m rsi.loop human-stats --config configs/api.yaml
+python -m rsi.loop smoke       --config configs/api.yaml
+python -m rsi.loop run         --config configs/api.yaml --run-name sprint1
+python -m rsi.loop final-test  --config configs/api.yaml --run-name sprint1   # exactly once
+python -m rsi.loop report      --run-name sprint1
 ```
-harness (many async calls) ──► rsi-gateway :9000 ──► vLLM / SGLang :8000 (H100)
-```
 
-- **Priority admission.** `x-rsi-priority: high|normal|low`. Game turns run before bulk eval sweeps, and in-flight requests are capped by `--max-inflight`.
-- **Response cache.** Keyed by a blake3 hash of the canonical request. Only seeded or greedy requests are cached, so reruns are free and reproducible. Bypass it with `x-rsi-cache: off`.
-- **Prefix-affinity routing.** Requests that share a system prompt go to the same replica, so that replica's KV prefix cache stays hot.
-- **Retries and budget.** Retries 429 and 5xx with backoff. `--token-budget` is a hard token cap, and the `x-rsi-run` header buckets token accounting per run.
-- **Monitoring.** `/stats` returns JSON and `/metrics` returns Prometheus text.
+## Components
+| Path | What |
+|---|---|
+| `crates/rsi-gateway` | Rust OpenAI-compatible gateway in front of the APIs. Content-addressed response cache, so reruns are free. USD/token budget. 429 retries that honour `Retry-After`. Priority admission. `/stats`, `/metrics`. `bench` load generator. |
+| `crates/rsi-core` | Rust (PyO3): weighted lie-detection metrics matching sklearn, a paired cluster bootstrap, an n-gram contamination index, and an Aho-Corasick prompt leak guard. |
+| `rsi/env` | Diplomacy engine wrapper, private bilateral message bus, and a private vault with isolation checks on every prompt. |
+| `rsi/agents` | Player (send / judge / orders) and privileged reviewer. Mock policies let everything run without a model. |
+| `rsi/evolve.py`, `rsi/gate.py` | Playbook evolution (diff voting, candidates, mined exemplars, Pareto front) and the acceptance gate (self-play bootstrap plus a human-val transfer check). |
+| `rsi/human_data.py`, `rsi/contamination.py` | Human benchmark loader (handles its label quirks), plus dedup, memorisation probe and paraphrase test. |
+
+## Gateway
 
 ```bash
 cargo build --release -p rsi-gateway
-./target/release/rsi-gateway serve --upstream http://127.0.0.1:8000 --cache-path runs/cache.bin --max-inflight 256
-./target/release/rsi-gateway bench --target http://127.0.0.1:9000 --concurrency 1,8,32,64,128,256
+./target/release/rsi-gateway serve --upstream https://YOUR_PROVIDER/v1 --cache-path runs/cache.bin --max-inflight 64 --usd-budget 50
+./target/release/rsi-gateway bench --target http://127.0.0.1:9000/v1 --concurrency 1,8,32,64
 ```
 
-`bench` replays traffic shaped like the harness: a shared genome prefix, a shared phase board, a short private suffix, and output constrained by a JSON schema. It reports TTFT and end-to-end p50/p90/p99 and throughput for each concurrency level. Use it to tune the engine flags against the real workload.
-
-## Serving target
-Production: vLLM or SGLang on an H100 80GB (Autolab), using the native NVFP4/MXFP8 checkpoint. Smoke tests: Google Colab.
+Request headers it understands:
+- `x-rsi-priority: high|normal|low`
+- `x-rsi-run: <name>` (per-run accounting)
+- `x-rsi-cache: off`

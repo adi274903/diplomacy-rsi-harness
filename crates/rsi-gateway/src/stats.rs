@@ -9,6 +9,14 @@ use std::time::Duration;
 
 use crate::admission::LEVELS;
 
+#[derive(Clone, Copy, Default)]
+pub struct Prices {
+    /// USD per million tokens
+    pub input: f64,
+    pub cached: f64,
+    pub output: f64,
+}
+
 pub struct Stats {
     pub requests: AtomicU64,
     pub cache_hits: AtomicU64,
@@ -47,6 +55,13 @@ impl Stats {
 
     pub fn used_tokens(&self) -> u64 {
         self.prompt_tokens.load(Relaxed) + self.completion_tokens.load(Relaxed)
+    }
+
+    pub fn cost_usd(&self, p: &Prices) -> f64 {
+        let prompt = self.prompt_tokens.load(Relaxed) as f64;
+        let cached = (self.cached_prompt_tokens.load(Relaxed) as f64).min(prompt);
+        let out = self.completion_tokens.load(Relaxed) as f64;
+        ((prompt - cached) * p.input + cached * p.cached + out * p.output) / 1e6
     }
 
     pub fn record_latency(&self, prio: usize, d: Duration) {

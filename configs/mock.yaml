@@ -1,0 +1,13 @@
+# Runs the whole harness with no model (MockLLM): use for development and CI.
+llm:
+  backend: mock
+game:
+  end_year: 1902
+  press_rounds: 2
+loop:
+  generations: 2
+  games_per_generation: 3
+  parallel_games: 3
+  gate_games: 2
+  candidates: 2
+  bootstrap_n: 200

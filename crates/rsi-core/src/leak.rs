@@ -49,7 +49,7 @@ impl LeakGuard {
                 Some(
                     AhoCorasickBuilder::new()
                         .ascii_case_insensitive(true)
-                        .match_kind(MatchKind::LeftmostFirst)
+                        .match_kind(MatchKind::Standard)
                         .build(&self.patterns)
                         .expect("aho-corasick build"),
                 )
@@ -64,7 +64,8 @@ impl LeakGuard {
         let Some(ac) = &self.automaton else { return Vec::new() };
         let mut seen = vec![false; self.patterns.len()];
         let mut out = Vec::new();
-        for m in ac.find_iter(text) {
+        // Overlapping search: secrets may overlap or nest, and every one must be reported.
+        for m in ac.find_overlapping_iter(text) {
             let id = m.pattern().as_usize();
             if !seen[id] {
                 seen[id] = true;

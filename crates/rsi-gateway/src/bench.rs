@@ -4,7 +4,8 @@
 //! league member) and a phase board (shared by all 7 powers in a phase), followed by a short
 //! private suffix. This generator reproduces that structure so engine knobs (prefix caching,
 //! chunked prefill, max running requests, speculative decoding) are tuned against the actual
-//! workload rather than random prompts.
+//! workload rather than random prompts. Against a hosted API it measures what the provider gives
+//! you at each concurrency level (and where rate limiting starts), so `--max-inflight` can be set.
 //!
 //! Output: one JSON line per concurrency level with TTFT / end-to-end percentiles and throughput.
 
@@ -20,8 +21,8 @@ use hdrhistogram::Histogram;
 
 #[derive(Args, Clone)]
 pub struct BenchArgs {
-    /// Base URL of the gateway or engine (without /v1).
-    #[arg(long, default_value = "http://127.0.0.1:9000")]
+    /// OpenAI-compatible base URL including /v1 (the gateway, or a provider directly).
+    #[arg(long, default_value = "http://127.0.0.1:9000/v1")]
     target: String,
     #[arg(long, default_value = "inkling")]
     model: String,
@@ -161,7 +162,7 @@ struct Sample {
 async fn one(client: &reqwest::Client, a: &BenchArgs, body: serde_json::Value) -> Sample {
     let t0 = Instant::now();
     let mut req = client
-        .post(format!("{}/v1/chat/completions", a.target.trim_end_matches('/')))
+        .post(format!("{}/chat/completions", a.target.trim_end_matches('/')))
         .header("x-rsi-cache", "off")
         .header("x-rsi-run", "bench")
         .header(reqwest::header::CONTENT_TYPE, "application/json")
