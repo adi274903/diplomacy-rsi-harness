@@ -70,6 +70,9 @@ class LoopConfig(BaseModel):
     human_val_truth_ratio: int = 4     # truths sampled per lie in the human val gate set
     sim_gate_truth_ratio: int = 4
     frozen_share: float = 0.5          # share of seats given to frozen league members
+    # Tell players that deception is accepted, rewarded play (see genome.DECEPTION_INCENTIVE). Raises the
+    # number of self-labelled lies so the self-play gate has positives. Changes v0's system prompt.
+    deception_incentive: bool = False
     label_mode: Literal["intent", "promise", "either"] = "intent"
     seed: int = 0
 
