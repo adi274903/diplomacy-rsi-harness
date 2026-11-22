@@ -13,3 +13,4 @@ data/raw/
 runs/
 *.cache.bin
 .env
+*.egg-info/
