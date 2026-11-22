@@ -2,7 +2,9 @@
 
 Never used for training: no human text may enter a playbook, exemplar or diff (enforced by the
 n-gram contamination index in `rsi.contamination`). Split roles:
-    train      -> reviewer validation and baseline only
+    train      -> reviewer validation and baseline; optionally the acceptance gate's item set
+                  (`loop.gate_source: human_train | auto`, games `loop.human_gate_games`). The reviewer
+                  never sees these items: they only decide which reviewer-proposed edits survive.
     validation -> transfer gate (each accepted genome must not regress on it)
     test       -> final evaluation, exactly once (guarded by a lock file)
 
@@ -150,3 +152,19 @@ def to_items(dialogs: list[list[Row]], window: int, task: str = "actual") -> lis
 
 def all_texts(dialogs: list[list[Row]]) -> list[str]:
     return [r.text for d in dialogs for r in d]
+
+
+def train_gate_items(splits: dict[str, list[list[Row]]], games: list[int], window: int,
+                     truth_ratio: int, seed: int) -> list[JudgeItem]:
+    """Gate items from human TRAIN games: every lie plus `truth_ratio` sampled truths per lie, weighted
+    back to the games' true lie rate. Refuses games that are not in the train split."""
+    from rsi.judge import balance
+
+    train_games = {r.game_id for d in splits["train"] for r in d}
+    held_out = {r.game_id for s in ("validation", "test") for d in splits.get(s, []) for r in d}
+    bad = sorted(set(games) - train_games)
+    if bad:
+        raise ValueError(f"human gate games {bad} are not train games"
+                         + (f" (held out: {sorted(set(bad) & held_out)})" if set(bad) & held_out else ""))
+    dialogs = [d for d in splits["train"] if d and d[0].game_id in set(games)]
+    return balance(to_items(dialogs, window), truth_ratio, seed)
