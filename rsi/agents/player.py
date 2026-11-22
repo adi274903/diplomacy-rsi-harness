@@ -9,7 +9,7 @@ import zlib
 from rsi import prompts
 from rsi.genome import Genome
 from rsi.llm import CallMeta, register_mock
-from rsi.schemas import ItemJudgment, JudgeTurn, OrdersTurn, SendTurn
+from rsi.schemas import GraphItemJudgment, GraphJudgeTurn, ItemJudgment, JudgeTurn, OrdersTurn, SendTurn
 
 
 def call_seed(*parts) -> int:
@@ -37,14 +37,16 @@ class Player:
         )
 
     async def judge(self, board: str, private: str, incoming: list[prompts.ShownMessage],
-                    phase: str, round_no: int) -> tuple[JudgeTurn, CallMeta]:
-        task = prompts.judge_task(incoming)
+                    phase: str, round_no: int, shown_ids: list[int] | None = None) -> tuple[JudgeTurn, CallMeta]:
+        structured = self.genome.structured_judgments
+        task = prompts.judge_task(incoming, structured=structured)
         return await self.llm.complete_json(
             messages=prompts.player_messages(self.genome, board, private, task),
-            schema=JudgeTurn, role="judge", effort=self.genome.effort.get("judge", "medium"),
+            schema=GraphJudgeTurn if structured else JudgeTurn, role="judge",
+            effort=self.genome.effort.get("judge", "medium"),
             seed=call_seed(self.game_seed, phase, self.power, "judge", round_no),
             temperature=self.genome.temperature, priority="high", model=self.model,
-            mock_ctx={"ids": [m.id for m in incoming]},
+            mock_ctx={"ids": [m.id for m in incoming], "shown": shown_ids or []},
         )
 
     async def orders(self, board: str, private: str, possible: dict[str, list[str]],
@@ -104,6 +106,32 @@ def _mock_orders(rng: random.Random, ctx: dict) -> dict:
     return {"reasoning": f"Mock orders reasoning {rng.randint(0, 10**9)} for this phase.",
             "orders": _random_orders(rng, ctx.get("possible", {})),
             "memory": f"Mock orders memory {rng.randint(0, 10**9)} for later phases."}
+
+
+def _mock_graph(rng: random.Random, p: float, shown: list[str]) -> dict:
+    """A small, internally consistent graph; cites a shown source when there is one."""
+    ev = [{"id": "e1", "source": rng.choice(shown) if shown else "message", "claim": "c1",
+           "relation": rng.choice(["supports", "contradicts", "background"]), "note": "mock evidence"}]
+    adj = [{"basis": "e1", "direction": "toward_lie" if p >= 0.05 else "toward_truth", "strength": "weak",
+            "note": "mock step"}]
+    return {"claims": [{"id": "c1", "text": "mock claim", "type": "statement_of_intent", "checkable": True}],
+            "evidence": ev, "adjustments": adj}
+
+
+@register_mock(GraphJudgeTurn)
+def _mock_graph_judge(rng: random.Random, ctx: dict) -> dict:
+    out = _mock_judge(rng, ctx)
+    shown = [f"#{i}" for i in ctx.get("shown", [])]
+    for j in out["judgments"]:
+        j.update(_mock_graph(rng, j["p_lie"], shown))
+    return out
+
+
+@register_mock(GraphItemJudgment)
+def _mock_graph_item(rng: random.Random, ctx: dict) -> dict:
+    out = _mock_item(rng, ctx)
+    out.update(_mock_graph(rng, out["p_lie"], [f"h{k}" for k in range(1, ctx.get("history", 0) + 1)]))
+    return out
 
 
 @register_mock(ItemJudgment)

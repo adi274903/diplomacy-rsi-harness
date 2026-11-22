@@ -68,6 +68,9 @@ class LoopConfig(BaseModel):
     sim_gate_truth_ratio: int = 4
     frozen_share: float = 0.5          # share of seats given to frozen league members
     label_mode: Literal["intent", "promise", "either"] = "intent"
+    # Receivers answer with a decision graph (claims, cited evidence, adjustments); see rsi/decision_graph.py.
+    # Sets Genome.structured_judgments on v0, so every genome descended from it inherits it.
+    structured_judgments: bool = False
     seed: int = 0
 
 

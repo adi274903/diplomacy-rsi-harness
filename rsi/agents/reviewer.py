@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import random
 
+from rsi import decision_graph
 from rsi.agents.player import call_seed
 from rsi.genome import Genome
 from rsi.llm import LLMError, register_mock
 from rsi.schemas import GameReview, PlaybookDiff
 
 REVIEWER_SYSTEM = """You are the reviewer for a research sandbox in which AI agents play Diplomacy. Unlike the players, you can see everything: each message, the sender's PRIVATE intent label and the orders it planned when sending, the orders it actually submitted, and the receiver's trust judgment with its reasoning.
+
+Where a receiver judgment includes a decision graph (claims, cited evidence, adjustments from the base rate, plus automatic checks), use it: say which node went wrong, for example a claim it missed, evidence it misread or cited without adjusting, or a step weighted too lightly or heavily.
 
 For every judged message, output a grade:
 - promise: did the sender's actual orders keep the commitments stated in the message? (kept / broken / no_promise / unclear)
@@ -34,6 +37,9 @@ def _fmt_message(m: dict, send: dict | None, judgment: dict | None, actual: list
     if judgment:
         lines.append(f"  receiver judgment: p_lie={judgment['p_lie']:.2f} {judgment['decision']}; "
                      f"reasoning: {judgment['reasoning']}")
+        if judgment.get("graph"):
+            graph = decision_graph.summary(judgment["graph"], judgment.get("graph_checks"))
+            lines += ["  receiver decision graph:"] + [f"    {ln}" for ln in graph.splitlines()]
     else:
         lines.append("  receiver judgment: (none)")
     return "\n".join(lines)

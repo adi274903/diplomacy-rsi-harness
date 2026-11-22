@@ -9,11 +9,11 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from rsi import prompts
+from rsi import decision_graph, prompts
 from rsi.agents.player import call_seed
 from rsi.genome import Genome
 from rsi.llm import LLMError
-from rsi.schemas import ItemJudgment
+from rsi.schemas import GraphItemJudgment, ItemJudgment
 
 
 @dataclass
@@ -42,20 +42,31 @@ class ItemResult:
     reasoning: str
     cues: list[str]
     ok: bool
+    graph: dict | None = None
+    graph_checks: dict | None = None
 
 
 async def judge_items(genome: Genome, items: list[JudgeItem], llm, *, priority: str = "low",
                       concurrency: int = 128, salt: str = "") -> list[ItemResult]:
     sem = asyncio.Semaphore(concurrency)
+    structured = genome.structured_judgments
 
     async def one(it: JudgeItem) -> ItemResult:
         async with sem:
             try:
                 out, _ = await llm.complete_json(
-                    messages=prompts.item_messages(genome, it), schema=ItemJudgment, role="item_judge",
+                    messages=prompts.item_messages(genome, it),
+                    schema=GraphItemJudgment if structured else ItemJudgment, role="item_judge",
                     effort=genome.effort.get("item_judge", "medium"), priority=priority,
-                    temperature=genome.temperature, seed=call_seed("item", it.item_id, salt), mock_ctx={})
-                return ItemResult(it.item_id, out.p_lie, out.decision, out.reasoning, list(out.cues), True)
+                    temperature=genome.temperature, seed=call_seed("item", it.item_id, salt),
+                    mock_ctx={"history": len(it.history)})
+                res = ItemResult(it.item_id, out.p_lie, out.decision, out.reasoning, list(out.cues), True)
+                if structured:
+                    res.graph = decision_graph.graph_of(out)
+                    # items show numbered history lines h1..hn, and a board only for self-play replays
+                    allowed = {f"h{k}" for k in range(1, len(it.history) + 1)}
+                    res.graph_checks = decision_graph.check(res.graph, allowed, board_shown=bool(it.board))
+                return res
             except LLMError:
                 # Failed calls abstain at the prior; the failure rate is reported alongside metrics.
                 return ItemResult(it.item_id, 0.5, "trust", "", [], False)

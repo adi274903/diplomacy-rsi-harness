@@ -46,6 +46,8 @@ class JudgeRecord:
     cues: list[str]
     native_reasoning: str = ""
     ok: bool = True
+    graph: dict | None = None          # decision graph, when the genome has structured_judgments
+    graph_checks: dict | None = None   # rsi.decision_graph.check() on it
 
 
 @dataclass

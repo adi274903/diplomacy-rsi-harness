@@ -68,6 +68,7 @@ python -m rsi.loop report      --run-name sprint1
 | `rsi/agents` | Player (send / judge / orders) and privileged reviewer. Mock policies let everything run without a model. |
 | `rsi/evolve.py`, `rsi/gate.py` | Playbook evolution (diff voting, candidates, mined exemplars, Pareto front) and the acceptance gate (self-play bootstrap plus a human-val transfer check). |
 | `rsi/human_data.py`, `rsi/contamination.py` | Human benchmark loader (handles its label quirks), plus dedup, memorisation probe and paraphrase test. |
+| `rsi/decision_graph.py` | Opt-in structured judgments (`loop.structured_judgments: true`). Receivers answer with a decision graph: claims, evidence cited by message id, and log-odds steps from the base rate. Every judgment gets automatic checks (citations of unseen messages, contradictions cited without an adjustment, stated vs implied p_lie). The reviewer and the causal graph use it. |
 
 ## Gateway
 
