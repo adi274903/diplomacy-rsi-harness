@@ -26,6 +26,9 @@ pub struct Stats {
     pub prompt_tokens: AtomicU64,
     pub cached_prompt_tokens: AtomicU64,
     pub completion_tokens: AtomicU64,
+    /// provider-reported spend (OpenRouter `usage.cost`), in micro-dollars
+    pub reported_cost_micro: AtomicU64,
+    pub reported_cost_responses: AtomicU64,
     latency_ms: Mutex<Vec<Histogram<u64>>>,
     queue_wait_ms: Mutex<Histogram<u64>>,
     /// per-run token accounting, keyed by the `x-rsi-run` header: (requests, prompt, completion)
@@ -47,6 +50,8 @@ impl Stats {
             prompt_tokens: AtomicU64::new(0),
             cached_prompt_tokens: AtomicU64::new(0),
             completion_tokens: AtomicU64::new(0),
+            reported_cost_micro: AtomicU64::new(0),
+            reported_cost_responses: AtomicU64::new(0),
             latency_ms: Mutex::new((0..LEVELS).map(|_| hist()).collect()),
             queue_wait_ms: Mutex::new(hist()),
             runs: Mutex::new(HashMap::new()),
@@ -57,7 +62,12 @@ impl Stats {
         self.prompt_tokens.load(Relaxed) + self.completion_tokens.load(Relaxed)
     }
 
+    /// Provider-reported spend when the provider reports it (exact, works with mixed models),
+    /// otherwise an estimate from the configured per-token prices.
     pub fn cost_usd(&self, p: &Prices) -> f64 {
+        if self.reported_cost_responses.load(Relaxed) > 0 {
+            return self.reported_cost_micro.load(Relaxed) as f64 / 1e6;
+        }
         let prompt = self.prompt_tokens.load(Relaxed) as f64;
         let cached = (self.cached_prompt_tokens.load(Relaxed) as f64).min(prompt);
         let out = self.completion_tokens.load(Relaxed) as f64;
@@ -80,6 +90,10 @@ impl Stats {
         let p = u["prompt_tokens"].as_u64().unwrap_or(0);
         let c = u["completion_tokens"].as_u64().unwrap_or(0);
         let cached = u["prompt_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
+        if let Some(cost) = u["cost"].as_f64() {
+            self.reported_cost_micro.fetch_add((cost * 1e6).round() as u64, Relaxed);
+            self.reported_cost_responses.fetch_add(1, Relaxed);
+        }
         self.prompt_tokens.fetch_add(p, Relaxed);
         self.completion_tokens.fetch_add(c, Relaxed);
         self.cached_prompt_tokens.fetch_add(cached, Relaxed);

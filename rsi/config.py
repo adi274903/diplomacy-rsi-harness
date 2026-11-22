@@ -20,9 +20,12 @@ class LLMConfig(BaseModel):
     max_connections: int = 256
     # How reasoning effort is passed: top-level `reasoning_effort`, `chat_template_kwargs`, both, or none.
     # Providers differ; check yours and set this so unknown fields are not rejected.
-    effort_mode: Literal["top", "kwargs", "both", "none"] = "both"
+    effort_mode: Literal["top", "kwargs", "both", "openrouter", "none"] = "both"   # openrouter: reasoning.effort
     # json_schema = provider-side constrained decoding; json_object / none = parse + validate (+1 repair) only.
     json_mode: Literal["json_schema", "json_object", "none"] = "json_schema"
+    # Some providers (e.g. Tinker's OpenAI-compatible API) only honour max_completion_tokens.
+    max_tokens_field: Literal["max_tokens", "max_completion_tokens", "both"] = "max_tokens"
+    extra_headers: dict[str, str] = Field(default_factory=dict)
     run_name: str = "default"
     max_tokens: dict[str, int] = Field(default_factory=lambda: {
         "send": 1536, "judge": 1536, "orders": 1536, "review": 6144, "item_judge": 1024, "text": 512,
@@ -30,6 +33,11 @@ class LLMConfig(BaseModel):
 
 
 class GameConfig(BaseModel):
+    map_name: str = "standard"
+    # Powers played by agents; the rest are uncontrolled (units hold, no press). None = all powers.
+    active_powers: list[str] | None = None
+    # Optional per-power model override (e.g. a different lab's model per country). Unset = llm.model.
+    power_models: dict[str, str] = Field(default_factory=dict)
     press_rounds: int = 2
     max_messages_per_round: int = 2
     end_year: int = 1906

@@ -57,9 +57,12 @@ class Vault:
     traces: list[dict] = field(default_factory=list)                              # every private text, tagged
     leak_hits: list[dict] = field(default_factory=list)
     min_secret_len: int = 24
+    powers: list[str] = field(default_factory=lambda: list(POWERS))
 
     def __post_init__(self) -> None:
-        self._guards = {p: LeakGuard(self.min_secret_len) for p in POWERS}
+        self._guards = {p: LeakGuard(self.min_secret_len) for p in self.powers}
+        for p in self.powers:
+            self.memory.setdefault(p, [])
 
     # -- registration -----------------------------------------------------------------------------
     def secret(self, owner: str, text: str, tag: str) -> None:
@@ -70,14 +73,14 @@ class Vault:
         self.traces.append({"owner": owner, "tag": tag, "text": text})
         pieces = [s.strip() for s in _SENTENCE.split(text)]
         pieces = [s for s in pieces if len(s) >= self.min_secret_len] or [text]
-        for p in POWERS:
+        for p in self.powers:
             if p != owner:
                 for s in pieces:
                     self._guards[p].add(s, f"{owner}:{tag}")
 
     def bilateral(self, sender: str, recipient: str, text: str, msg_id: int) -> None:
         """A message is secret from everyone except its two parties."""
-        for p in POWERS:
+        for p in self.powers:
             if p not in (sender, recipient):
                 self._guards[p].add(text, f"msg:{msg_id}:{sender}->{recipient}")
 

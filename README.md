@@ -32,6 +32,21 @@ make serve     # viewer at http://127.0.0.1:8765
 - **Game page:** the rendered board with each phase's orders (use the arrow keys to step through phases). It shows every message with the sender's private intent, the receiver's p_lie, its decision and reasoning, and the outcome (lie caught / fooled / false alarm). It also shows orders, supply centres and isolation-leak counts. This is the **privileged** view; players never see it.
 - CI uploads the viewer for a mock run as a build artifact on every push.
 
+## Live multi-model demo (OpenRouter)
+
+There are four agent-controlled countries on the standard map, each played by a different lab's model. The other three countries are uncontrolled. Claude Opus 5.5 is the privileged judge. See `configs/live_demo.yaml`.
+
+```bash
+# .env: PLAYER_API_BASE / REVIEWER_API_BASE = https://openrouter.ai/api/v1, keys = your OpenRouter key
+scripts/gateways.sh
+python -m rsi.loop run --config configs/live_demo.yaml --run-name live1
+python -m rsi.viewer serve runs/live1 --gateway player=http://127.0.0.1:9000 --gateway judge=http://127.0.0.1:9001
+```
+
+Game pages update in place while a game is being played: a live feed, the board, and messages with intent, p_lie and outcome. Each page also has a **decision-trace graph** per phase. Its edges run plan → message → judgment → (cited in) later plan/orders → orders → supply-centre change, and clicking a node shows that agent's reasoning.
+
+> The OpenRouter account needs credits. On the free tier with $0 credit, OpenRouter rejects parallel requests with `402 in_flight_budget_exhausted`, because it reserves `max_tokens × price` for every request in flight.
+
 ## Real API run
 
 ```bash

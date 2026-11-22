@@ -287,7 +287,11 @@ async fn chat(State(app): State<Arc<App>>, headers: HeaderMap, body: Bytes) -> R
                         }
                         Err(e) => Step::Retry(format!("read body: {e}"), None),
                     }
-                } else if retryable(status) {
+                } else if retryable(status)
+                    // OpenRouter's in-flight credit reservation: 402 + Retry-After means "wait for
+                    // in-flight requests to settle", not "out of money", so it is worth retrying.
+                    || (status == StatusCode::PAYMENT_REQUIRED && retry_after(resp.headers()).is_some())
+                {
                     let ra = retry_after(resp.headers());
                     let text = resp.text().await.unwrap_or_default();
                     Step::Retry(format!("{status}: {}", text.chars().take(300).collect::<String>()), ra)

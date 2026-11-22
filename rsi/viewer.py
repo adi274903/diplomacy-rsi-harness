@@ -23,6 +23,8 @@ from pathlib import Path
 
 import httpx
 
+from rsi.causal import game_graphs
+
 CSS = """
 :root{--bg:#f7f7f5;--panel:#fff;--ink:#1d1d1f;--muted:#6b6b70;--line:#e3e3e0;--accent:#2f5bd3;
 --good:#1f8a4c;--bad:#c2372f;--warn:#b7791f;--chip:#efefec}
@@ -50,6 +52,19 @@ th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;le
 .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 button,select{font:inherit;padding:5px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
 details summary{cursor:pointer;color:var(--muted)}
+.live{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:6px;
+animation:pulse 1.4s infinite}@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.live{animation:none}}
+.graphwrap{overflow-x:auto}.graph text{font:11px system-ui,sans-serif;fill:var(--ink)}
+.graph .hdr{fill:var(--muted);font-weight:600}.graph .lane{stroke:var(--line)}
+.graph .n rect{fill:var(--chip);stroke:var(--line);stroke-width:1.2;cursor:pointer}
+.graph .n.good rect{stroke:var(--good);stroke-width:2}.graph .n.bad rect{stroke:var(--bad);stroke-width:2}
+.graph .n.warn rect{stroke:var(--warn);stroke-width:2}.graph .n.sel rect{fill:var(--accent);fill-opacity:.18}
+.graph path{fill:none;stroke-width:1.4;opacity:.8}.graph .e-wrote{stroke:var(--muted)}
+.graph .e-judged{stroke:var(--accent)}.graph .e-cited{stroke:var(--warn);stroke-dasharray:5 4}
+.graph .e-kept,.graph .e-result{stroke:var(--muted);stroke-dasharray:2 3}
+#gdetail{white-space:pre-wrap;max-height:320px;overflow:auto;font-size:13px}
+.legend span{margin-right:14px;font-size:12px;color:var(--muted)}
 """
 
 
@@ -87,13 +102,15 @@ def _outcome(intent: str | None, j: dict | None) -> tuple[str, str]:
 # ---- game page ------------------------------------------------------------------------------------
 
 GAME_JS = r"""
-const D = JSON.parse(document.getElementById('data').textContent);
+let D = JSON.parse(document.getElementById('data').textContent);
 const sel = document.getElementById('phase'), img = document.getElementById('map');
 const msgs = document.getElementById('msgs'), ords = document.getElementById('orders'), sc = document.getElementById('sc');
-D.phases.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=p;sel.appendChild(o);});
+function fillPhases(){ sel.innerHTML=''; D.phases.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=p;sel.appendChild(o);}); }
+fillPhases();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function show(i){
-  i = Math.max(0, Math.min(D.phases.length-1, i)); sel.value = i; const ph = D.phases[i];
+  i = Math.max(0, Math.min(D.phases.length-1, i)); sel.value = i; const ph = D.phases[i]; remember(i);
+  drawGraph(D.graphs[ph]);
   if (D.maps) { img.src = D.maps + '/' + ph + '.svg'; img.alt = 'Board at ' + ph; }
   const ms = D.messages.filter(m => m.phase === ph);
   msgs.innerHTML = ms.length ? ms.map(m => {
@@ -111,14 +128,76 @@ function show(i){
     Object.entries(od).sort().map(([p,o]) => `<tr><td>${esc(p)}</td><td>${esc(o.join('; ')||'(none)')}</td></tr>`).join('') + '</table>'
     : '<p class=muted>No orders recorded (final position).</p>';
   const h = D.sc_history.find(x => x.phase === ph) || {sc: D.final_sc};
-  sc.innerHTML = '<table><tr><th>Power</th><th>Seat</th><th>SC</th></tr>' + Object.entries(h.sc).sort((a,b)=>b[1]-a[1])
+  sc.innerHTML = '<table><tr><th>Power</th><th>Model · playbook</th><th>SC</th></tr>' + Object.entries(h.sc).sort((a,b)=>b[1]-a[1])
     .map(([p,n]) => `<tr><td>${esc(p)}</td><td class=muted>${esc(D.seats[p]||'')}</td><td>${n}</td></tr>`).join('') + '</table>';
+}
+const live = D.status === 'running';
+function startIndex(){
+  const h = decodeURIComponent(location.hash);
+  if (h.startsWith('#p=')) { const i = D.phases.indexOf(h.slice(3)); if (i >= 0) return i; }
+  return live || h === '#live' ? D.phases.length - 1 : 0;
+}
+function remember(i){ history.replaceState(null, '', (live && i === D.phases.length - 1) ? '#live' : '#p=' + D.phases[i]); }
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent){ const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function drawGraph(g){
+  const box = document.getElementById('graph'), det = document.getElementById('gdetail');
+  box.innerHTML = ''; det.textContent = 'Click a node to read the agent\'s plan, message, judgment or orders reasoning.';
+  if (!g || !g.nodes.length) { box.innerHTML = '<p class=muted>No decisions recorded for this phase yet.</p>'; return; }
+  const colW = 128, nodeW = 108, nodeH = 24, gap = 4, padL = 84, padT = 30;
+  const stack = {}; g.nodes.forEach(n => { const k = n.col + '|' + n.power; n.k = stack[k] = (stack[k] || 0) + 1; });
+  const laneH = g.powers.map(p => Math.max(56, Math.max(0, ...g.nodes.filter(n => n.power === p).map(n => n.k)) * (nodeH + gap) + 18));
+  const laneY = []; laneH.reduce((y, h, i) => (laneY[i] = y, y + h), padT);
+  const W = padL + g.cols.length * colW, H = laneY[laneY.length - 1] + laneH[laneH.length - 1] + 6;
+  const svg = el('svg', {class: 'graph', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img',
+                        'aria-label': 'Decision-trace graph for ' + g.phase}, box);
+  const defs = el('defs', {}, svg), mk = el('marker', {id: 'arr', viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse'}, defs);
+  el('path', {d: 'M0,0 L8,4 L0,8 z', style: 'fill:var(--muted);stroke:none'}, mk);
+  g.cols.forEach((c, i) => { const t = el('text', {x: padL + i * colW + 4, y: 16, class: 'hdr'}, svg); t.textContent = c; });
+  g.powers.forEach((p, i) => { el('line', {x1: 0, x2: W, y1: laneY[i] - 6, y2: laneY[i] - 6, class: 'lane'}, svg);
+    const t = el('text', {x: 4, y: laneY[i] + 14, class: 'hdr'}, svg); t.textContent = p; });
+  const pos = {}; g.nodes.forEach(n => { pos[n.id] = {x: padL + n.col * colW, y: laneY[g.powers.indexOf(n.power)] + (n.k - 1) * (nodeH + gap)}; });
+  const incoming = {};
+  g.edges.forEach(e => { const a = pos[e.from], b = pos[e.to]; if (!a || !b) return;
+    (incoming[e.to] = incoming[e.to] || []).push(e);
+    const x1 = a.x + nodeW, y1 = a.y + nodeH / 2, x2 = b.x - 2, y2 = b.y + nodeH / 2, dx = Math.max(30, (x2 - x1) / 2);
+    const path = el('path', {d: `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`, class: 'e-' + e.kind, 'marker-end': 'url(#arr)'}, svg);
+    const tt = el('title', {}, path); tt.textContent = e.kind + (e.label ? ': ' + e.label : '') + (e.evidence ? '\n' + e.evidence.join('\n') : ''); });
+  g.nodes.forEach(n => { const p = pos[n.id], gEl = el('g', {class: 'n ' + (n.tone || ''), transform: `translate(${p.x},${p.y})`, tabindex: 0}, svg);
+    el('rect', {width: nodeW, height: nodeH, rx: 6}, gEl);
+    const t = el('text', {x: 7, y: 16}, gEl); t.textContent = n.kind === 'plan' ? 'plan' : n.label;
+    const pick = () => { svg.querySelectorAll('.n.sel').forEach(x => x.classList.remove('sel')); gEl.classList.add('sel');
+      const ev = (incoming[n.id] || []).filter(e => e.evidence).map(e => `← ${e.label} (from ${e.from}):\n  "${e.evidence.join('"\n  "')}"`);
+      det.textContent = n.detail + (ev.length ? '\n\nCITED EARLIER JUDGMENTS:\n' + ev.join('\n') : ''); };
+    gEl.addEventListener('click', pick); gEl.addEventListener('keydown', e => { if (e.key === 'Enter') pick(); }); });
 }
 sel.onchange = () => show(+sel.value);
 document.getElementById('prev').onclick = () => show(+sel.value - 1);
 document.getElementById('next').onclick = () => show(+sel.value + 1);
 document.addEventListener('keydown', e => { if (e.key==='ArrowLeft') show(+sel.value-1); if (e.key==='ArrowRight') show(+sel.value+1); });
-show(0);
+function renderFeed(){
+  const f = document.getElementById('feed'); if (!f) return;
+  f.innerHTML = D.feed.length ? D.feed.map(m => `<div class=msg><div class=h>${esc(m.phase)} · <b>${esc(m.sender)}</b>
+    <span class=muted>(${esc(D.models[m.sender]||'')})</span> → <b>${esc(m.recipient)}</b>
+    · <span class="chip ${m.intent==='deceptive'?'bad':''}">${esc(m.intent||'?')}</span>
+    ${m.p_lie===null ? '<span class=muted>awaiting judgment…</span>' : `<span class=chip>p_lie ${m.p_lie.toFixed(2)}</span> <span class="${m.outcome[1]}">${esc(m.outcome[0])}</span>`}</div>
+    <div class=t>${esc(m.text)}</div></div>`).join('') : '<p class=muted>Waiting for the first messages…</p>';
+}
+renderFeed();
+show(startIndex());
+// Live: poll the server for the latest checkpoint and re-render in place (no page reload).
+async function refresh(){
+  try {
+    const r = await fetch('/api/game?f=' + encodeURIComponent(location.pathname));
+    if (!r.ok) throw 0;
+    const nd = await r.json();
+    const follow = +sel.value === D.phases.length - 1, cur = D.phases[+sel.value];
+    D = nd; fillPhases(); renderFeed();
+    show(follow ? D.phases.length - 1 : Math.max(0, D.phases.indexOf(cur)));
+    if (D.status === 'running') setTimeout(refresh, 2000); else location.reload();
+  } catch (e) { setTimeout(() => location.reload(), 5000); }
+}
+if (live) setTimeout(refresh, 2000);
 """
 
 
@@ -130,20 +209,33 @@ def game_summary(rec: dict) -> dict:
     return {"messages": len(rec["messages"]), "lies": len(lies), "caught": len(caught),
             "false_alarms": sum(1 for m, j in js.items() if j["decision"] == "distrust"
                                 and sends.get(m, {}).get("intent") == "truthful"),
-            "final_phase": rec["final_phase"], "error": rec.get("error"), "leaks": len(rec.get("leak_hits", []))}
+            "final_phase": rec["final_phase"], "error": rec.get("error"), "leaks": len(rec.get("leak_hits", [])),
+            "status": rec.get("status", "finished")}
 
 
-def build_game_page(game_json: Path) -> Path:
-    rec = json.loads(game_json.read_text())
+def game_data(rec: dict) -> dict:
+    """Everything the game page renders; also served live by `/api/game`."""
     sends = {int(k): v for k, v in rec["sends"].items()}
     js = {int(k): v for k, v in rec["judgments"].items()}
     outcomes = {m["id"]: _outcome(sends.get(m["id"], {}).get("intent"), js.get(m["id"])) for m in rec["messages"]}
     phases = rec.get("phases") or [h["phase"] for h in rec["sc_history"]] or [rec["final_phase"]]
-    data = {
+    models = rec.get("models", {})
+    feed = [{"id": m["id"], "phase": m["phase"], "sender": m["sender"], "recipient": m["recipient"], "text": m["text"],
+             "intent": sends.get(m["id"], {}).get("intent"), "outcome": outcomes[m["id"]],
+             "p_lie": js[m["id"]]["p_lie"] if m["id"] in js else None}
+            for m in rec["messages"][-14:]][::-1]
+    return {
+        "status": rec.get("status", "finished"), "graphs": game_graphs(rec), "feed": feed, "models": models,
         "phases": phases, "maps": rec.get("maps_dir"), "messages": rec["messages"], "sends": sends, "judgments": js,
         "outcomes": outcomes, "orders": rec["orders"], "sc_history": rec["sc_history"], "final_sc": rec["final_sc"],
-        "seats": {p: f"{rec['genome_names'].get(p, '')} {h}" for p, h in rec["seating"].items()},
+        "seats": {p: (models.get(p) or "") + " · " + rec["genome_names"].get(p, "") for p in rec["seating"]},
+        "summary": game_summary(rec),
     }
+
+
+def build_game_page(game_json: Path) -> Path:
+    rec = json.loads(game_json.read_text())
+    data = game_data(rec)
     s = game_summary(rec)
     st = rec.get("stats", {})
     invalid = f" · <b class=bad>INVALID: {_e(rec['error'])}</b>" if rec.get("error") else ""
@@ -152,8 +244,8 @@ def build_game_page(game_json: Path) -> Path:
     data_json = json.dumps(data).replace("</", "<\\/")
     body = f"""
 <p><a href="{_e(_rel_index(game_json))}">← run overview</a></p>
-<h1>Game {_e(rec['game_id'])}</h1>
-<p class=muted>Seed {_e(rec['seed'])} · reached {_e(rec['final_phase'])} · privileged view (intent labels and
+<h1>{'<span class=live title="live"></span>' if rec.get('status') == 'running' else ''}Game {_e(rec['game_id'])}</h1>
+<p class=muted>Seed {_e(rec['seed'])} · {_e(rec.get('map', 'standard'))} map · agents: {_e(', '.join(rec.get('active_powers') or sorted(rec['seating'])))} · {'playing ' if rec.get('status') == 'running' else 'reached '}{_e(rec['final_phase'])} · privileged view (intent labels and
 receiver judgments are hidden from players during play){invalid}</p>
 <div class=kpis>
  <div class="panel kpi"><div class=v>{s['messages']}</div><div class=l>messages</div></div>
@@ -166,11 +258,21 @@ receiver judgments are hidden from players during play){invalid}</p>
 <div class=controls style="margin-top:16px"><button id=prev aria-label="Previous phase">←</button>
 <select id=phase aria-label="Phase"></select><button id=next aria-label="Next phase">→</button>
 <span class=muted>arrow keys step through phases</span></div>
+{'<h2>Live feed</h2><div class=panel id=feed></div>' if rec.get('status') == 'running' else ''}
 <div class="grid two">
  <div><div class="panel map">{map_html}</div>
   <h2>Supply centres</h2><div class="panel scroll" id=sc></div></div>
  <div><h2 style="margin-top:0">Messages this phase</h2><div class=panel id=msgs></div>
   <h2>Orders</h2><div class="panel scroll" id=orders></div></div>
+</div>
+<h2>Decision-trace graph</h2>
+<div class=panel>
+ <p class="muted legend"><span>── wrote / kept / result</span><span style="color:var(--accent)">── judged</span>
+ <span style="color:var(--warn)">- - cited (receiver's later reasoning names the sender)</span>
+ <span style="color:var(--good)">▢ lie caught</span><span style="color:var(--bad)">▢ deceptive / fooled</span><span style="color:var(--warn)">▢ false alarm</span></p>
+ <div class=graphwrap id=graph></div>
+ <p class=muted style="font-size:12px">Links are attributed from the agents' own reasoning traces, not causally identified.</p>
+ <div class=panel id=gdetail style="margin-top:10px"></div>
 </div>
 <script type=application/json id=data>{data_json}</script>"""
     out = game_json.with_suffix(".html")
@@ -208,6 +310,7 @@ async function poll(){
   } catch (e) { /* static mode: no live telemetry */ }
 }
 poll(); setInterval(poll, 5000);
+if (document.querySelector('td .live')) setTimeout(() => location.reload(), 8000);   // games still running
 """
 
 
@@ -265,7 +368,7 @@ def build_index(run_dir: Path) -> Path:
                      f"<tr><td class=muted>{_e(gr)}</td><td><a href='{_e(href)}'>{_e(gid)}</a></td><td>{_e(s['final_phase'])}</td>"
                      f"<td>{s['messages']}</td><td>{s['lies']}</td><td class=good>{s['caught']}</td>"
                      f"<td class=warn>{s['false_alarms']}</td>"
-                     f"<td>{'<span class=bad>invalid</span>' if s['error'] else 'ok'}</td></tr>"
+                     f"<td>{'<span class=bad>invalid</span>' if s['error'] else '<span class=live></span>playing' if s['status'] == 'running' else 'finished'}</td></tr>"
                      for gr, gid, href, s in rows) + "</table></div>")
     out = run_dir / "index.html"
     out.write_text(_page(f"Run {run_dir.name}", "".join(parts), INDEX_JS))
@@ -286,6 +389,24 @@ def serve(run_dir: Path, port: int, gateways: dict[str, str]) -> None:
             pass
 
         def do_GET(self):
+            if self.path.startswith("/api/game"):
+                from urllib.parse import parse_qs, urlparse
+
+                f = parse_qs(urlparse(self.path).query).get("f", [""])[0]
+                src = (run_dir / f.lstrip("/")).with_suffix(".json")
+                try:
+                    if not (src.resolve().is_relative_to(run_dir.resolve()) and src.name.startswith("game_")):
+                        raise FileNotFoundError
+                    body = json.dumps(game_data(json.loads(src.read_text()))).encode()
+                    self.send_response(200)
+                except (OSError, ValueError, KeyError):
+                    body = b"{}"
+                    self.send_response(404)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path.startswith("/api/stats"):
                 out = {}
                 for name, url in gateways.items():
@@ -300,9 +421,18 @@ def serve(run_dir: Path, port: int, gateways: dict[str, str]) -> None:
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if self.path in ("/", "/index.html"):
+            path = self.path.split("?")[0].split("#")[0]
+            if path in ("/", "/index.html"):
                 with lock:
-                    build_index(run_dir)   # pick up games finished since the last load
+                    build_index(run_dir)   # pick up new / progressing games
+            elif path.endswith(".html"):
+                src = (run_dir / path.lstrip("/")).with_suffix(".json")
+                if src.name.startswith("game_") and src.exists():
+                    with lock:
+                        try:
+                            build_game_page(src)   # live: re-render from the latest checkpoint
+                        except (ValueError, KeyError):
+                            pass
             super().do_GET()
 
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)

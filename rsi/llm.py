@@ -39,24 +39,40 @@ class CallMeta:
 
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+_DECODER = json.JSONDecoder()
 
 
 def _extract_json(text: str) -> Any:
+    """Parse the reply's JSON object. Without engine-side constrained decoding the object may be
+    surrounded by prose or (if the server could not split it out) the model's reasoning, so fall
+    back to the LAST top-level JSON object in the text: the final answer comes last."""
     text = _FENCE.sub("", text.strip())
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # Tolerate prose around a JSON object (json_mode=none backends).
-        start, end = text.find("{"), text.rfind("}")
-        if start >= 0 and end > start:
-            return json.loads(text[start:end + 1])
-        raise
+        found, i = None, text.find("{")
+        while i >= 0:
+            try:
+                obj, end = _DECODER.raw_decode(text, i)
+                if isinstance(obj, dict):
+                    found = obj
+                i = text.find("{", end)
+            except json.JSONDecodeError:
+                i = text.find("{", i + 1)
+        if found is None:
+            raise
+        return found
+
+
+def schema_instruction(schema: type[BaseModel]) -> str:
+    return ("\n\n## Output format\nReply with ONLY one JSON object (no prose, no code fences) that validates "
+            "against this JSON Schema:\n" + json.dumps(schema.model_json_schema(), separators=(",", ":")))
 
 
 class HttpLLM:
     def __init__(self, cfg: LLMConfig):
         self.cfg = cfg
-        headers = {"x-rsi-run": cfg.run_name}
+        headers = {"x-rsi-run": cfg.run_name, **cfg.extra_headers}
         key = os.environ.get(cfg.api_key_env)
         if key:
             headers["authorization"] = f"Bearer {key}"
@@ -71,18 +87,30 @@ class HttpLLM:
     async def aclose(self) -> None:
         await self.client.aclose()
 
-    def _body(self, messages, role, seed, effort, temperature, schema: type[BaseModel] | None):
+    def _body(self, messages, role, seed, effort, temperature, schema: type[BaseModel] | None,
+              model: str | None = None):
+        if schema is not None and self.cfg.json_mode != "json_schema":
+            # No constrained decoding: the schema must be in the prompt (appended last, so the
+            # shared prefix stays cacheable).
+            messages = messages[:-1] + [{**messages[-1],
+                                         "content": messages[-1]["content"] + schema_instruction(schema)}]
+        limit = self.cfg.max_tokens.get(role, 1024)
         body: dict[str, Any] = {
-            "model": self.cfg.model,
+            "model": model or self.cfg.model,
             "messages": messages,
-            "max_tokens": self.cfg.max_tokens.get(role, 1024),
             "temperature": temperature,
             "seed": seed,
         }
+        if self.cfg.max_tokens_field in ("max_tokens", "both"):
+            body["max_tokens"] = limit
+        if self.cfg.max_tokens_field in ("max_completion_tokens", "both"):
+            body["max_completion_tokens"] = limit
         if effort and self.cfg.effort_mode in ("top", "both"):
             body["reasoning_effort"] = effort
         if effort and self.cfg.effort_mode in ("kwargs", "both"):
             body["chat_template_kwargs"] = {"reasoning_effort": effort}
+        if effort and self.cfg.effort_mode == "openrouter":
+            body["reasoning"] = {"effort": effort}
         if schema is not None and self.cfg.json_mode == "json_schema":
             body["response_format"] = {"type": "json_schema", "json_schema": {
                 "name": schema.__name__, "schema": schema.model_json_schema(), "strict": True}}
@@ -110,8 +138,8 @@ class HttpLLM:
 
     async def complete_json(self, *, messages: list[dict], schema: type[T], role: str, seed: int,
                             effort: str = "low", priority: str = "normal", temperature: float = 1.0,
-                            mock_ctx: dict | None = None) -> tuple[T, CallMeta]:
-        body = self._body(messages, role, seed, effort, temperature, schema)
+                            mock_ctx: dict | None = None, model: str | None = None) -> tuple[T, CallMeta]:
+        body = self._body(messages, role, seed, effort, temperature, schema, model)
         _, meta = await self._post(body, priority)
         try:
             return schema.model_validate(_extract_json(meta.raw)), meta
@@ -122,7 +150,7 @@ class HttpLLM:
                 {"role": "user", "content": f"That reply was invalid ({str(err)[:400]}). "
                                             f"Reply again with only a JSON object matching the schema."},
             ]
-            body = self._body(repair, role, seed + 7919, effort, temperature, schema)
+            body = self._body(repair, role, seed + 7919, effort, temperature, schema, model)
             _, meta2 = await self._post(body, priority)
             meta2.repaired = True
             try:
@@ -166,7 +194,7 @@ class MockLLM:
         return None
 
     async def complete_json(self, *, messages, schema: type[T], role, seed, effort="low", priority="normal",
-                            temperature=1.0, mock_ctx=None) -> tuple[T, CallMeta]:
+                            temperature=1.0, mock_ctx=None, model=None) -> tuple[T, CallMeta]:
         self.calls += 1
         self.prompts.append(messages)
         if self.latency_s:

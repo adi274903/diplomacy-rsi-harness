@@ -22,16 +22,18 @@ class League:
         if g.hash not in self.frozen:
             self.frozen.append(g.hash)
 
-    def seat(self, current: Genome, rng: random.Random, frozen_share: float) -> dict[str, Genome]:
+    def seat(self, current: Genome, rng: random.Random, frozen_share: float,
+             powers: list[str] | None = None) -> dict[str, Genome]:
+        powers = powers or POWERS
         self.members[current.hash] = current
         seating = {}
-        for p in POWERS:
+        for p in powers:
             if rng.random() < frozen_share:
                 seating[p] = self.members[rng.choice(self.frozen)]
             else:
                 seating[p] = current
         if all(g.hash != current.hash for g in seating.values()):   # current always plays
-            seating[rng.choice(POWERS)] = current
+            seating[rng.choice(powers)] = current
         return seating
 
     def record(self, game: dict) -> None:

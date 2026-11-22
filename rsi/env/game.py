@@ -13,15 +13,36 @@ SEASONS = {"S": "Spring", "F": "Fall", "W": "Winter"}
 _PHASE = re.compile(r"^([SFW])(\d{4})([MRA])$")
 
 
+def map_powers(map_name: str = "standard") -> list[str]:
+    from diplomacy import Game
+
+    return sorted(Game(map_name=map_name).powers)
+
+
+def game_powers(cfg) -> list[str]:
+    """Powers played by agents under a GameConfig."""
+    allp = POWERS if cfg.map_name == "standard" else map_powers(cfg.map_name)
+    if cfg.active_powers:
+        bad = set(cfg.active_powers) - set(allp)
+        assert not bad, f"unknown powers for map {cfg.map_name}: {bad}"
+        return sorted(cfg.active_powers)
+    return list(allp)
+
+
+_LOC_PREFIX = re.compile(r"^[A-Z]{3}(?:/[A-Z]{2})?\s*:\s*")
+
+
 def _norm_order(o: str) -> str:
-    return " ".join(o.strip().upper().split())
+    o = " ".join(o.strip().upper().split())
+    return _LOC_PREFIX.sub("", o)    # some models write "PAR: A PAR H"
 
 
 class DiplomacyEnv:
-    def __init__(self, end_year: int = 1906, max_order_options: int = 40):
+    def __init__(self, end_year: int = 1906, max_order_options: int = 40, map_name: str = "standard"):
         from diplomacy import Game  # imported lazily so the rest of the harness imports without it
 
-        self.game = Game(map_name="standard")
+        self.game = Game(map_name=map_name)
+        self.powers: list[str] = sorted(self.game.powers)
         self.end_year = end_year
         self.max_order_options = max_order_options
         self.last_orders: dict[str, list[str]] = {}
@@ -47,16 +68,16 @@ class DiplomacyEnv:
 
     # -- public state ---------------------------------------------------------------------------
     def units(self) -> dict[str, list[str]]:
-        return {p: list(self.game.get_units(p)) for p in POWERS}
+        return {p: list(self.game.get_units(p)) for p in self.powers}
 
     def centers(self) -> dict[str, list[str]]:
-        return {p: list(self.game.get_centers(p)) for p in POWERS}
+        return {p: list(self.game.get_centers(p)) for p in self.powers}
 
     def sc_counts(self) -> dict[str, int]:
         return {p: len(c) for p, c in self.centers().items()}
 
     def alive(self) -> list[str]:
-        return [p for p in POWERS if self.game.get_units(p) or self.game.get_centers(p)]
+        return [p for p in self.powers if self.game.get_units(p) or self.game.get_centers(p)]
 
     # -- orders ---------------------------------------------------------------------------------
     def possible_orders(self, power: str) -> dict[str, list[str]]:
@@ -96,11 +117,15 @@ class DiplomacyEnv:
         if orders:
             self.game.set_orders(power, orders)
 
-    def render_svg(self) -> str:
-        """Current board as SVG, with the orders set for this phase drawn on it."""
+    def render_svg(self) -> str | None:
+        """Current board as SVG, with the orders set for this phase drawn on it (None if the map
+        ships without board art)."""
         from diplomacy.engine.renderer import Renderer
 
-        return Renderer(self.game).render(incl_orders=True, incl_abbrev=True, output_format="svg")
+        try:
+            return Renderer(self.game).render(incl_orders=True, incl_abbrev=True, output_format="svg")
+        except Exception:  # noqa: BLE001 - variant maps without an SVG
+            return None
 
     def process(self, submitted: dict[str, list[str]]) -> None:
         """Adjudicate. Orders become public afterwards, as in the real game."""

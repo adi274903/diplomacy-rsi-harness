@@ -1,0 +1,42 @@
+# Live demo: 4 countries on the standard map, each played by a different lab's model via OpenRouter,
+# Claude Opus 5.5 as the privileged judge/reviewer. The other 3 powers are uncontrolled (units hold).
+#   scripts/gateways.sh                                   # :9000 players, :9001 judge (both OpenRouter)
+#   python -m rsi.loop run --config configs/live_demo.yaml --run-name live1
+#   python -m rsi.viewer serve runs/live1 --gateway player=http://127.0.0.1:9000 --gateway reviewer=http://127.0.0.1:9001
+llm:
+  backend: http
+  base_url: http://127.0.0.1:9000/v1
+  model: thinkingmachines/inkling-2-mini    # default player + gate/eval judge model
+  effort_mode: openrouter                   # sends reasoning: {effort}
+  json_mode: none                           # mixed models: schema in prompt + validate + 1 repair
+  max_connections: 64
+  max_tokens: {send: 4000, judge: 4000, orders: 4000, item_judge: 3000, review: 8000, text: 400}
+  extra_headers: {X-Title: diplomacy-rsi-harness}
+reviewer_llm:
+  backend: http
+  base_url: http://127.0.0.1:9001/v1
+  model: anthropic/claude-opus-5.5
+  effort_mode: none
+  json_mode: none
+  max_connections: 8
+  max_tokens: {review: 8000, item_judge: 3000, text: 400}
+  extra_headers: {X-Title: diplomacy-rsi-harness}
+game:
+  map_name: standard
+  active_powers: [AUSTRIA, FRANCE, GERMANY, ITALY]
+  power_models:
+    AUSTRIA: thinkingmachines/inkling-2-mini
+    FRANCE: anthropic/claude-haiku-5.5
+    GERMANY: deepseek/deepseek-v4.1-flash
+    ITALY: mistralai/mistral-small-2603
+  end_year: 1905
+  press_rounds: 2
+  max_messages_per_round: 2
+loop:
+  generations: 6
+  games_per_generation: 4
+  parallel_games: 4
+  gate_games: 3
+  candidates: 3
+  patience: 3
+  frozen_share: 0.25

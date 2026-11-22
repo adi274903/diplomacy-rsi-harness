@@ -18,8 +18,9 @@ def call_seed(*parts) -> int:
 
 
 class Player:
-    def __init__(self, power: str, genome: Genome, llm, game_seed: int):
+    def __init__(self, power: str, genome: Genome, llm, game_seed: int, model: str | None = None):
         self.power = power
+        self.model = model          # None = the default model of `llm`
         self.genome = genome
         self.llm = llm
         self.game_seed = game_seed
@@ -31,7 +32,7 @@ class Player:
             messages=prompts.player_messages(self.genome, board, private, task),
             schema=SendTurn, role="send", effort=self.genome.effort.get("send", "low"),
             seed=call_seed(self.game_seed, phase, self.power, "send", round_no),
-            temperature=self.genome.temperature, priority="high",
+            temperature=self.genome.temperature, priority="high", model=self.model,
             mock_ctx={"recipients": recipients, "max": max_messages, "possible": possible, "power": self.power},
         )
 
@@ -42,7 +43,7 @@ class Player:
             messages=prompts.player_messages(self.genome, board, private, task),
             schema=JudgeTurn, role="judge", effort=self.genome.effort.get("judge", "medium"),
             seed=call_seed(self.game_seed, phase, self.power, "judge", round_no),
-            temperature=self.genome.temperature, priority="high",
+            temperature=self.genome.temperature, priority="high", model=self.model,
             mock_ctx={"ids": [m.id for m in incoming]},
         )
 
@@ -53,7 +54,7 @@ class Player:
             messages=prompts.player_messages(self.genome, board, private, task),
             schema=OrdersTurn, role="orders", effort=self.genome.effort.get("orders", "low"),
             seed=call_seed(self.game_seed, phase, self.power, "orders"),
-            temperature=self.genome.temperature, priority="high",
+            temperature=self.genome.temperature, priority="high", model=self.model,
             mock_ctx={"possible": possible},
         )
 

@@ -20,7 +20,7 @@ from rsi import human_data
 from rsi.agents.reviewer import Reviewer
 from rsi.config import Config, load_config
 from rsi.contamination import build_index, memorization_probe, overlap_report, paraphrase_items
-from rsi.env.game import POWERS
+from rsi.env.game import game_powers
 from rsi.evolve import (FrontEntry, aggregate_diffs, effort_candidate, exemplar_candidate, mine_exemplars,
                         pareto_front, propose_candidates)
 from rsi.gate import gate
@@ -37,12 +37,16 @@ def _log(run_dir: Path, name: str, row: dict) -> None:
         f.write(json.dumps(row) + "\n")
 
 
+def _progress(msg: str) -> None:
+    print(time.strftime("%H:%M:%S"), msg, flush=True)
+
+
 async def play_many(specs: list[tuple[str, int, dict[str, Genome]]], llm, cfg: Config, out_dir: Path) -> list[dict]:
     sem = asyncio.Semaphore(cfg.loop.parallel_games)
 
     async def one(gid, seed, seating):
         async with sem:
-            return await run_game(gid, seed, seating, llm, cfg.game, out_dir)
+            return await run_game(gid, seed, seating, llm, cfg.game, out_dir, progress=_progress)
 
     games = await asyncio.gather(*(one(*s) for s in specs))
     bad = [g["game_id"] for g in games if g["error"]]
@@ -61,7 +65,8 @@ def _human_val_items(cfg: Config, splits) -> list:
 async def cmd_smoke(cfg: Config, run_dir: Path) -> None:
     llm = make_llm(cfg.llm)
     v0 = default_genome()
-    g = await run_game("smoke", cfg.loop.seed, {p: v0 for p in POWERS}, llm, cfg.game, run_dir / "games")
+    g = await run_game("smoke", cfg.loop.seed, {p: v0 for p in game_powers(cfg.game)}, llm, cfg.game,
+                       run_dir / "games", progress=_progress)
     s = g["stats"]
     print(f"phase reached {g['final_phase']}, messages {len(g['messages'])}, judgments {len(g['judgments'])}, "
           f"calls {s['calls']} (failed {s['failed_calls']}), invalid orders {s['invalid_orders']}, "
@@ -92,7 +97,8 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
     league = League(v0)
 
     print(f"[gate] playing {lc.gate_games} frozen gate games (v0 in every seat, disjoint seeds)")
-    gate_games = await play_many([(f"gate{i}", 10_000 + i, {p: v0 for p in POWERS}) for i in range(lc.gate_games)],
+    powers = game_powers(cfg.game)
+    gate_games = await play_many([(f"gate{i}", 10_000 + i, {p: v0 for p in powers}) for i in range(lc.gate_games)],
                                  llm, cfg, run_dir / "gate_games")
     sim_items = balance([it for g in gate_games for it in items_from_game(g, cfg.game.history_window, lc.label_mode)],
                         lc.sim_gate_truth_ratio, lc.seed)
@@ -110,15 +116,17 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
     for gen in range(1, lc.generations + 1):
         t0 = time.time()
         parent = rng.choice(pareto_front(front)).genome
-        specs = [(f"g{gen}_{i}", gen * 1000 + i, league.seat(parent, rng, lc.frozen_share))
+        specs = [(f"g{gen}_{i}", gen * 1000 + i, league.seat(parent, rng, lc.frozen_share, powers))
                  for i in range(lc.games_per_generation)]
-        print(f"[gen {gen}] parent {parent.name} ({parent.hash}); playing {len(specs)} games")
+        _progress(f"[gen {gen}] parent {parent.name} ({parent.hash}); playing {len(specs)} games")
         games = await play_many(specs, llm, cfg, run_dir / f"gen_{gen}" / "games")
         for g in games:
             league.record(g)
 
         reviews_list = await asyncio.gather(*(reviewer.review_game(g, parent) for g in games))
         reviews = {g["game_id"]: r for g, r in zip(games, reviews_list)}
+        for gid, r in reviews.items():   # next to each game, so the viewer can show it
+            (run_dir / f"gen_{gen}" / "games" / f"review_{gid}.json").write_text(r.model_dump_json(indent=2))
         with open(run_dir / f"gen_{gen}" / "reviews.jsonl", "w") as f:
             for gid, r in reviews.items():
                 f.write(json.dumps({"game_id": gid, **r.model_dump()}) + "\n")
@@ -210,9 +218,12 @@ def main() -> None:
     ap.add_argument("--run-name", default=None)
     ap.add_argument("--mock", action="store_true", help="force the mock LLM backend")
     ap.add_argument("--force", action="store_true", help="final-test: allow re-running (recorded)")
+    ap.add_argument("--end-year", type=int, default=None, help="override game.end_year")
     a = ap.parse_args()
 
     cfg = load_config(a.config)
+    if a.end_year:
+        cfg.game.end_year = a.end_year
     if a.mock:
         cfg.llm.backend = "mock"
         if cfg.reviewer_llm:
