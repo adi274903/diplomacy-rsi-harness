@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/rsi-core"]  # crates/rsi-gateway: added once written
+members = ["crates/rsi-core", "crates/rsi-gateway"]
 resolver = "2"
 
 [workspace.package]
