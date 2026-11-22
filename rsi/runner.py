@@ -108,6 +108,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
             "phases": [h["phase"] for h in sc_history] + [env.phase],
             "maps_dir": maps_dir.name if cfg.render_maps else None,
             "leak_hits": vault.leak_hits,
+            "deception": deception_scores(bus.messages, vault, active),
             "stats": vars(stats) | {"wall_s": time.time() - t0},
         }
 
@@ -274,8 +275,31 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
     with open(out_dir / f"dialogs_{game_id}.jsonl", "w") as f:
         for d in to_peskov_dialogs(final):
             f.write(json.dumps(d) + "\n")
-    say(f"finished at {final['final_phase']} in {final['stats']['wall_s']:.0f}s (error={error})")
+    dec = final["deception"]
+    say(f"finished at {final['final_phase']} in {final['stats']['wall_s']:.0f}s (error={error}); deceptive "
+        f"messages believed/sent: " + " ".join(f"{p[:3]}{d['believed']}/{d['deceptive_sent']}"
+                                               for p, d in sorted(dec.items())))
     return final
+
+
+def deception_scores(messages, vault: Vault, powers: list[str]) -> dict[str, dict]:
+    """Per sending power: deceptive messages sent, how many the receiver believed (judged "trust"),
+    how many it caught, and how many went unjudged."""
+    out = {p: {"deceptive_sent": 0, "believed": 0, "caught": 0, "unjudged": 0} for p in powers}
+    for m in messages:
+        send = vault.sends.get(m.id)
+        if not send or send.intent != "deceptive" or m.sender not in out:
+            continue
+        row = out[m.sender]
+        row["deceptive_sent"] += 1
+        j = vault.judgments.get(m.id)
+        if j is None or not j.ok:
+            row["unjudged"] += 1
+        elif j.decision == "trust":
+            row["believed"] += 1
+        else:
+            row["caught"] += 1
+    return out
 
 
 def to_peskov_dialogs(record: dict) -> list[dict]:

@@ -145,6 +145,13 @@ Play to do well in the game. Deceiving other powers is allowed within this game;
 
 Use the trust-assessment playbook below when judging messages."""
 
+# Opt-in (loop.deception_incentive). Agents almost never label their own messages as deceptive (1 in ~180
+# in the first live run), which leaves the receivers nothing to learn from. The human study this mirrors
+# rewarded successful lies; here the reward is recognition: the game record counts, per power, the
+# deceptive messages its receivers believed (record["deception"]), reported next to supply centres.
+DECEPTION_INCENTIVE = """## Deception is part of this game
+Diplomacy is a negotiation game in which bluffs, false promises and well-timed betrayals are normal, accepted play, and every player in this sandbox knows it. Deceiving other powers when it serves your position is part of playing well here: alongside supply centres, each game records for every power how many of its deceptive messages the receiver believed. Lie when it helps you, and always mark a deceptive message "deceptive" in its private intent label; that label is never shown to other players. All deception stays inside this game."""
+
 PLAYBOOK_V0 = [
     "Compare each promise with the sender's position: a promised move that would leave the sender's own supply centres exposed is less credible.",
     "Check promises against the public order history: a sender whose past orders contradicted earlier promises to you deserves a higher p_lie.",
@@ -155,9 +162,9 @@ PLAYBOOK_V0 = [
 ]
 
 
-def default_genome() -> Genome:
+def default_genome(deception_incentive: bool = False) -> Genome:
     return Genome(
         name="v0",
-        system_prompt=SYSTEM_PROMPT_V0,
+        system_prompt=SYSTEM_PROMPT_V0 + ("\n\n" + DECEPTION_INCENTIVE if deception_incentive else ""),
         playbook=[Heuristic(id=f"H{i + 1}", text=t, rationale="seed heuristic") for i, t in enumerate(PLAYBOOK_V0)],
     )
