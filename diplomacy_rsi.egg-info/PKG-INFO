@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: diplomacy-rsi
+Version: 0.1.0
+Summary: Self-play RSI harness for reasoning-traced trust decisions in Diplomacy
+Requires-Python: <3.14,>=3.10
+Requires-Dist: diplomacy>=1.2
+Requires-Dist: httpx>=0.27
+Requires-Dist: pydantic>=2.7
+Requires-Dist: pyyaml>=6
+Requires-Dist: numpy>=1.26
+Provides-Extra: fast
+Requires-Dist: rsi-core; extra == "fast"
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
+Requires-Dist: scikit-learn>=1.4; extra == "dev"
+Requires-Dist: maturin>=1.7; extra == "dev"

@@ -13,7 +13,6 @@ pub const LEVELS: usize = 3;
 
 pub struct Admission {
     st: Mutex<State>,
-    pub capacity: usize,
 }
 
 struct State {
@@ -29,10 +28,7 @@ pub struct Permit {
 
 impl Admission {
     pub fn new(capacity: usize) -> Arc<Self> {
-        Arc::new(Admission {
-            st: Mutex::new(State { available: capacity, queues: Default::default() }),
-            capacity,
-        })
+        Arc::new(Admission { st: Mutex::new(State { available: capacity, queues: Default::default() }) })
     }
 
     /// `prio`: 0 = high, 1 = normal, 2 = low.

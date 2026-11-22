@@ -96,6 +96,12 @@ class DiplomacyEnv:
         if orders:
             self.game.set_orders(power, orders)
 
+    def render_svg(self) -> str:
+        """Current board as SVG, with the orders set for this phase drawn on it."""
+        from diplomacy.engine.renderer import Renderer
+
+        return Renderer(self.game).render(incl_orders=True, incl_abbrev=True, output_format="svg")
+
     def process(self, submitted: dict[str, list[str]]) -> None:
         """Adjudicate. Orders become public afterwards, as in the real game."""
         self.last_phase = self.phase

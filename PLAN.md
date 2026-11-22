@@ -78,6 +78,7 @@ rsi/runner.py        one self-play game           rsi/judge.py     receiver-seat
 rsi/human_data.py    benchmark loader             rsi/score.py     metrics, calibration
 rsi/gate.py          acceptance gate              rsi/league.py    seating, ratings
 rsi/contamination.py dedup, memorisation, paraphrase   rsi/loop.py  CLI      rsi/report.py  results.md
+rsi/viewer.py        static run/game pages (board SVG per phase, messages, outcomes) + live gateway telemetry
 ```
 
 ## Verification

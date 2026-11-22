@@ -1,0 +1,28 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v6
+      - name: setup
+        run: make setup
+      - name: rust tests
+        run: make test-rust
+      - name: python tests
+        run: make test-py
+      - name: mock self-play loop + viewer
+        run: |
+          make run RUN=ci CONFIG=configs/mock.yaml
+          make viewer RUN=ci
+      - name: upload viewer
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewer-ci-run
+          path: runs/ci
+          retention-days: 14

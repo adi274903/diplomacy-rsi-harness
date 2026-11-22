@@ -37,6 +37,7 @@ class GameConfig(BaseModel):
     memory_window: int = 6            # own memory notes shown to a player
     max_order_options: int = 40       # per location, keeps prompts bounded mid-game
     strict_isolation: bool = True     # raise on any detected leak instead of logging it
+    render_maps: bool = True          # save an SVG board (with orders) per phase for the viewer
 
 
 class LoopConfig(BaseModel):

@@ -8,22 +8,33 @@ A harness for recursive self-improvement on reasoning-traced trust decisions in 
 
 See [PLAN.md](PLAN.md) for the design and the contamination controls.
 
-> **Status:** all code is written but has **not yet been compiled or run**. Expect a round of fixes on the first `cargo test` / `pytest`.
+> **Status:** builds and passes all tests (15 Rust, 16 Python). The full self-play loop runs end to end on the mock backend. It has **not yet been run against a real model API**.
 
 ## Quickstart
 
+**Easiest:** open the repo in GitHub Codespaces or the VS Code Dev Containers extension. The devcontainer installs Python 3.12, Rust and uv, then runs setup, the tests and a mock game.
+
+**Locally** (needs [uv](https://docs.astral.sh/uv/) and Rust). Exact versions are pinned in `uv.lock` and `Cargo.lock`.
+
 ```bash
-# 1. Python env (Python 3.10–3.13)
-uv venv --python 3.12 .venv && uv pip install -e ".[dev]"
-# optional: build the Rust hot paths (pure-Python fallback otherwise)
-uv pip install -e crates/rsi-core
+make setup     # .venv from uv.lock + Rust extension + gateway binary
+make test      # Rust + Python tests
+make smoke     # one 7-agent self-play game, mock model (no API cost)
+make run       # full RSI loop on the mock (RUN=mock1)
+make serve     # viewer at http://127.0.0.1:8765
+```
 
-# 2. Tests + a full game with no model
-pytest
-python -m rsi.loop smoke --config configs/mock.yaml
-python -m rsi.loop run   --config configs/mock.yaml --run-name mock1
+## Viewing games and telemetry
 
-# 3. Real run against hosted APIs
+- `make viewer RUN=<run>` writes static pages to `runs/<run>/index.html`. You can open them directly, or zip the run folder to share it.
+- `make serve RUN=<run>` serves the same pages. It rebuilds the overview as new games finish and shows **live gateway telemetry**, refreshed every 5 seconds: requests, cache hits, estimated cost, tokens, latency percentiles, queue depth and retries.
+- **Run overview:** baseline, a table per generation, every gate decision with its bootstrap CI, human-test results, and a list of games.
+- **Game page:** the rendered board with each phase's orders (use the arrow keys to step through phases). It shows every message with the sender's private intent, the receiver's p_lie, its decision and reasoning, and the outcome (lie caught / fooled / false alarm). It also shows orders, supply centres and isolation-leak counts. This is the **privileged** view; players never see it.
+- CI uploads the viewer for a mock run as a build artifact on every push.
+
+## Real API run
+
+```bash
 cp .env.example .env            # fill in provider URLs, keys, prices, budgets
 scripts/gateways.sh             # player gateway :9000, reviewer gateway :9001
 python -m rsi.loop human-stats --config configs/api.yaml

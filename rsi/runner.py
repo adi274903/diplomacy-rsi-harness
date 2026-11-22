@@ -67,6 +67,9 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
     bus, vault, stats = Bus(), Vault(), GameStats()
     players = {p: Player(p, seating[p], llm, game_seed=seed) for p in POWERS}
     boards: dict[str, str] = {}
+    maps_dir = out_dir / f"maps_{game_id}"
+    if cfg.render_maps:
+        maps_dir.mkdir(exist_ok=True)
     sc_history: list[dict] = []
     error = None
 
@@ -163,10 +166,16 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                 if meta:
                     vault.secret(p, meta.reasoning, f"thinking:{phase}:orders")
             vault.orders[phase] = submitted
+            if cfg.render_maps:
+                # board with this phase's orders drawn on it, rendered off the event loop
+                svg = await asyncio.to_thread(env.render_svg)
+                (maps_dir / f"{phase}.svg").write_text(svg)
             env.process(submitted)
             sc_history.append({"phase": phase, "sc": env.sc_counts()})
     except IsolationError as e:
         error = f"isolation: {e}"          # the game is invalid and must not be used for training
+    if cfg.render_maps and error is None:
+        (maps_dir / f"{env.phase}.svg").write_text(await asyncio.to_thread(env.render_svg))
 
     record = {
         "game_id": game_id,
@@ -182,6 +191,8 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
         "judgments": {m: asdict(r) for m, r in vault.judgments.items()},
         "orders": vault.orders,
         "boards": boards,
+        "phases": [h["phase"] for h in sc_history] + [env.phase],
+        "maps_dir": maps_dir.name if cfg.render_maps else None,
         "leak_hits": vault.leak_hits,
         "stats": vars(stats) | {"wall_s": time.time() - t0},
     }
