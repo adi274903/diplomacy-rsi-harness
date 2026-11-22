@@ -86,6 +86,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
     players = {p: Player(p, seating[p], llm, game_seed=seed, model=cfg.power_models.get(p)) for p in active}
     boards: dict[str, str] = {}
     reasoning: dict[str, dict] = {}       # phase -> power -> private reasoning texts (viewer / causal graph)
+    activity: dict[str, str] = {}         # power -> what it is doing right now (live viewer)
     sc_history: list[dict] = []
     error = None
     maps_dir = out_dir / f"maps_{game_id}"
@@ -103,7 +104,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
             "messages": [m.to_dict() for m in bus.messages],
             "sends": {m: asdict(r) for m, r in vault.sends.items()},
             "judgments": {m: asdict(r) for m, r in vault.judgments.items()},
-            "orders": vault.orders, "boards": boards, "reasoning": reasoning,
+            "orders": vault.orders, "boards": boards, "reasoning": reasoning, "activity": dict(activity),
             "phases": [h["phase"] for h in sc_history] + [env.phase],
             "maps_dir": maps_dir.name if cfg.render_maps else None,
             "leak_hits": vault.leak_hits,
@@ -116,6 +117,26 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
     def say(msg: str) -> None:
         if progress:
             progress(f"[{game_id}] {msg}")
+
+    async def each(coros):
+        """Results in completion order when streaming (live viewer), else in submission order."""
+        if cfg.stream_events:
+            for fut in asyncio.as_completed([asyncio.ensure_future(c) for c in coros]):
+                yield await fut
+        else:
+            for r in await asyncio.gather(*coros):
+                yield r
+
+    def busy(powers, what: str) -> None:
+        for p in powers:
+            activity[p] = what
+        if cfg.stream_events:
+            checkpoint()
+
+    def done(p: str) -> None:
+        activity.pop(p, None)
+        if cfg.stream_events:
+            checkpoint()
 
     def note(phase: str, power: str, key: str, text: str) -> None:
         if text:
@@ -146,8 +167,10 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                                                               rnd, cfg.press_rounds, phase, poss[p]), stats)
 
                     sent: dict[str, list[Message]] = {p: [] for p in alive}
-                    for p, (turn, meta) in await asyncio.gather(*(do_send(p) for p in alive)):
+                    busy(alive, f"writing messages (round {rnd})")
+                    async for p, (turn, meta) in each([do_send(p) for p in alive]):
                         if turn is None:
+                            done(p)
                             continue
                         vault.secret(p, turn.analysis, f"analysis:{phase}:{rnd}")
                         vault.secret(p, meta.reasoning, f"thinking:{phase}:send:{rnd}")
@@ -166,6 +189,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                             vault.sends[m.id] = SendRecord(m.id, om.intent, list(turn.plan), turn.analysis)
                             vault.bilateral(p, to, m.text, m.id)
                             sent[to].append(m)
+                        done(p)
                     checkpoint()
 
                     # -- JUDGE (receivers judge on receipt, before any orders are revealed) ------
@@ -177,8 +201,9 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                         vault.check(p, view, private + task, cfg.strict_isolation, f"{phase}:judge:{rnd}")
                         return p, incoming, await _safe(players[p].judge(board, private, shown, phase, rnd), stats)
 
+                    busy([p for p, ms in sent.items() if ms], f"judging received messages (round {rnd})")
                     jobs = [do_judge(p, ms) for p, ms in sent.items() if ms]
-                    for p, incoming, (turn, meta) in await asyncio.gather(*jobs):
+                    async for p, incoming, (turn, meta) in each(jobs):
                         got = {j.msg_id: j for j in (turn.judgments if turn else [])}
                         for m in incoming:
                             j = got.get(m.id)
@@ -190,6 +215,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                             vault.secret(p, j.reasoning, f"judge:{m.id}")
                         if meta:
                             vault.secret(p, meta.reasoning, f"thinking:{phase}:judge:{rnd}")
+                        done(p)
                     checkpoint()
 
             # -- ORDERS -----------------------------------------------------------------------------
@@ -204,8 +230,10 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                 return p, possible, await _safe(players[p].orders(board, private, possible, phase), stats)
 
             submitted: dict[str, list[str]] = {}
-            for p, possible, (turn, meta) in await asyncio.gather(*(do_orders(p) for p in alive)):
+            busy([p for p in alive if poss[p]], "choosing orders")
+            async for p, possible, (turn, meta) in each([do_orders(p) for p in alive]):
                 if not possible:
+                    done(p)
                     continue
                 valid, invalid = env.validate(p, turn.orders if turn else [], possible)
                 stats.invalid_orders += len(invalid)
@@ -219,6 +247,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                 if meta:
                     vault.secret(p, meta.reasoning, f"thinking:{phase}:orders")
                     note(phase, p, "orders_thinking", meta.reasoning)
+                done(p)
             vault.orders[phase] = submitted
             if cfg.render_maps:
                 # board with this phase's orders drawn on it, rendered off the event loop

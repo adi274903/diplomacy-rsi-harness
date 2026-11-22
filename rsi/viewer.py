@@ -65,6 +65,9 @@ animation:pulse 1.4s infinite}@keyframes pulse{50%{opacity:.25}}
 .graph .e-kept,.graph .e-result{stroke:var(--muted);stroke-dasharray:2 3}
 #gdetail{white-space:pre-wrap;max-height:320px;overflow:auto;font-size:13px}
 .legend span{margin-right:14px;font-size:12px;color:var(--muted)}
+.act{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:var(--chip);
+margin:0 6px 6px 0;font-size:12px}.rsi h3{margin:0 0 6px;font-size:14px}.rsi ol{margin:6px 0 0 18px;padding:0}
+.rsi .ev{font-size:12px;color:var(--muted);margin:2px 0}.rsi .grid{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
 """
 
 
@@ -183,7 +186,33 @@ function renderFeed(){
     ${m.p_lie===null ? '<span class=muted>awaiting judgment…</span>' : `<span class=chip>p_lie ${m.p_lie.toFixed(2)}</span> <span class="${m.outcome[1]}">${esc(m.outcome[0])}</span>`}</div>
     <div class=t>${esc(m.text)}</div></div>`).join('') : '<p class=muted>Waiting for the first messages…</p>';
 }
-renderFeed();
+const esc2 = s => esc(s == null ? '' : s);
+function renderActivity(){
+  const a = document.getElementById('activity'); if (!a) return;
+  const e = Object.entries(D.activity || {});
+  a.innerHTML = e.length ? e.map(([p, w]) => `<span class=act><span class=live></span><b>${esc(p)}</b>
+    <span class=muted>${esc2((D.models[p]||'').split('/').pop())}</span> ${esc(w)}…</span>`).join('')
+    : (D.status === 'running' ? '<span class="act muted">adjudicating…</span>' : '');
+}
+function renderRSI(r){
+  const box = document.getElementById('rsi'); if (!r || !r.stage) return; box.hidden = false;
+  const pb = r.incumbent || {}, diffs = r.diffs || [], ev = r.events || [];
+  box.innerHTML = `<div class=grid>
+   <div><h3>RSI · ${esc(r.stage)}${r.gen ? ' · gen ' + r.gen : ''}</h3>
+     <div class=muted style="font-size:12px">current playbook <b>${esc2(pb.name)}</b> (${esc2(pb.hash)}) · ${(pb.heuristics||[]).length} heuristics · ${esc2(pb.exemplars)} exemplars · judge effort ${esc2(pb.judge_effort)}</div>
+     ${ev.slice(0, 6).map(e => `<div class=ev>${esc(e.t)} · ${esc(e.text)}</div>`).join('')}</div>
+   <div><h3>Playbook in use</h3><ol>${(pb.heuristics||[]).map(h => `<li title="${esc(h.id)}" style="font-size:12px">${esc(h.text)}</li>`).join('')}</ol></div>
+   ${diffs.length ? `<div><h3>Judge's proposed edits (latest)</h3>${diffs.map(d => `<div class=ev><span class=chip>${esc(d.op)}${d.id ? ' ' + esc(d.id) : ''} ×${d.votes}</span>${esc2(d.text)}</div>`).join('')}</div>` : ''}
+  </div>`;
+}
+async function rsi(){ try { const r = await fetch('/api/rsi'); if (r.ok) renderRSI(await r.json()); } catch (e) {} }
+const followRun = new URLSearchParams(location.search).has('follow');
+async function waitNext(){
+  try { const c = await (await fetch('/api/current')).json(); await rsi();
+    if (c.path && c.path !== location.pathname) { location.href = c.path + '?follow=1#live'; return; } } catch (e) {}
+  setTimeout(waitNext, 3000);
+}
+renderFeed(); renderActivity(); rsi();
 show(startIndex());
 // Live: poll the server for the latest checkpoint and re-render in place (no page reload).
 async function refresh(){
@@ -192,12 +221,14 @@ async function refresh(){
     if (!r.ok) throw 0;
     const nd = await r.json();
     const follow = +sel.value === D.phases.length - 1, cur = D.phases[+sel.value];
-    D = nd; fillPhases(); renderFeed();
+    D = nd; fillPhases(); renderFeed(); renderActivity(); rsi();
     show(follow ? D.phases.length - 1 : Math.max(0, D.phases.indexOf(cur)));
-    if (D.status === 'running') setTimeout(refresh, 2000); else location.reload();
+    if (D.status === 'running') setTimeout(refresh, 2000);
+    else if (followRun) waitNext();     // follow the run into its next game
+    else location.reload();
   } catch (e) { setTimeout(() => location.reload(), 5000); }
 }
-if (live) setTimeout(refresh, 2000);
+if (live) setTimeout(refresh, 2000); else if (followRun) waitNext();
 """
 
 
@@ -226,6 +257,7 @@ def game_data(rec: dict) -> dict:
             for m in rec["messages"][-14:]][::-1]
     return {
         "status": rec.get("status", "finished"), "graphs": game_graphs(rec), "feed": feed, "models": models,
+        "activity": rec.get("activity", {}), "game_id": rec["game_id"],
         "phases": phases, "maps": rec.get("maps_dir"), "messages": rec["messages"], "sends": sends, "judgments": js,
         "outcomes": outcomes, "orders": rec["orders"], "sc_history": rec["sc_history"], "final_sc": rec["final_sc"],
         "seats": {p: (models.get(p) or "") + " · " + rec["genome_names"].get(p, "") for p in rec["seating"]},
@@ -258,7 +290,8 @@ receiver judgments are hidden from players during play){invalid}</p>
 <div class=controls style="margin-top:16px"><button id=prev aria-label="Previous phase">←</button>
 <select id=phase aria-label="Phase"></select><button id=next aria-label="Next phase">→</button>
 <span class=muted>arrow keys step through phases</span></div>
-{'<h2>Live feed</h2><div class=panel id=feed></div>' if rec.get('status') == 'running' else ''}
+<div class="panel rsi" id=rsi hidden style="margin-top:12px"></div>
+{'<h2>Live feed</h2><div id=activity></div><div class=panel id=feed></div>' if rec.get('status') == 'running' else ''}
 <div class="grid two">
  <div><div class="panel map">{map_html}</div>
   <h2>Supply centres</h2><div class="panel scroll" id=sc></div></div>
@@ -377,6 +410,24 @@ def build_index(run_dir: Path) -> Path:
 
 # ---- live server ------------------------------------------------------------------------------------
 
+def _current_game(run_dir: Path) -> str | None:
+    """URL path of the game being played now (else the most recent one), for /live follow mode."""
+    games = sorted(run_dir.rglob("game_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for g in games:
+        try:
+            if json.loads(g.read_text()).get("status") == "running":
+                if not g.with_suffix(".html").exists():
+                    build_game_page(g)
+                return "/" + g.with_suffix(".html").relative_to(run_dir).as_posix()
+        except (ValueError, OSError):
+            continue
+    if games:
+        if not games[0].with_suffix(".html").exists():
+            build_game_page(games[0])
+        return "/" + games[0].with_suffix(".html").relative_to(run_dir).as_posix()
+    return None
+
+
 def serve(run_dir: Path, port: int, gateways: dict[str, str]) -> None:
     build_index(run_dir)
     lock = threading.Lock()
@@ -389,6 +440,25 @@ def serve(run_dir: Path, port: int, gateways: dict[str, str]) -> None:
             pass
 
         def do_GET(self):
+            if self.path.startswith("/api/rsi") or self.path.startswith("/api/current") or \
+                    self.path.split("?")[0] == "/live":
+                cur = _current_game(run_dir)
+                if self.path.split("?")[0] == "/live":
+                    self.send_response(302)
+                    self.send_header("location", (cur + "?follow=1#live") if cur else "/index.html")
+                    self.end_headers()
+                    return
+                if self.path.startswith("/api/rsi"):
+                    p = run_dir / "rsi_status.json"
+                    body = p.read_bytes() if p.exists() else b"{}"
+                else:
+                    body = json.dumps({"path": cur}).encode()
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path.startswith("/api/game"):
                 from urllib.parse import parse_qs, urlparse
 
@@ -436,7 +506,8 @@ def serve(run_dir: Path, port: int, gateways: dict[str, str]) -> None:
             super().do_GET()
 
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"viewer: http://127.0.0.1:{port}/  (run {run_dir}; gateways: {gateways or 'none'})")
+    print(f"viewer: http://127.0.0.1:{port}/  ·  live game: http://127.0.0.1:{port}/live  "
+          f"(run {run_dir}; gateways: {gateways or 'none'})")
     srv.serve_forever()
 
 

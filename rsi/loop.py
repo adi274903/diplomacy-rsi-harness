@@ -37,6 +37,31 @@ def _log(run_dir: Path, name: str, row: dict) -> None:
         f.write(json.dumps(row) + "\n")
 
 
+class RSIStatus:
+    """Live RSI state for the viewer (runs/<run>/rsi_status.json): stage, playbook, diffs, gate."""
+
+    def __init__(self, run_dir: Path):
+        self.path = run_dir / "rsi_status.json"
+        self.s: dict = {"stage": "starting", "gen": 0, "events": []}
+
+    def update(self, stage: str | None = None, event: str | None = None, **kw) -> None:
+        if stage:
+            self.s["stage"] = stage
+        if event:
+            self.s["events"] = ([{"t": time.strftime("%H:%M:%S"), "text": event}] + self.s["events"])[:40]
+            _progress("[rsi] " + event)
+        self.s.update(kw)
+        self.s["updated"] = time.strftime("%H:%M:%S")
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.s))
+        tmp.replace(self.path)
+
+    @staticmethod
+    def playbook(g: Genome) -> dict:
+        return {"name": g.name, "hash": g.hash, "heuristics": [{"id": h.id, "text": h.text} for h in g.playbook],
+                "exemplars": len(g.exemplars), "judge_effort": g.effort.get("judge")}
+
+
 def _progress(msg: str) -> None:
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
@@ -95,6 +120,9 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
     v0 = default_genome()
     v0.save(run_dir / "genomes")
     league = League(v0)
+    st = RSIStatus(run_dir)
+    st.update("gate games", f"playing {lc.gate_games} frozen gate game(s) with playbook v0",
+              incumbent=RSIStatus.playbook(v0), decisions=[], diffs=[])
 
     print(f"[gate] playing {lc.gate_games} frozen gate games (v0 in every seat, disjoint seeds)")
     powers = game_powers(cfg.game)
@@ -112,17 +140,22 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
     front = [FrontEntry(v0, m0.get("auprc", 0.0), m0.get("ece", 1.0))]
     incumbent, stale = v0, 0
     _log(run_dir, "generations.jsonl", {"gen": 0, "incumbent": v0.hash, "sim_gate": m0})
+    st.update("baseline", f"v0 baseline on the gate: AUPRC {m0.get('auprc', float('nan')):.3f}, "
+                          f"ECE {m0.get('ece', float('nan')):.3f} ({m0.get('n_lie', 0)} lies / {m0.get('n', 0)} items)",
+              baseline=m0)
 
     for gen in range(1, lc.generations + 1):
         t0 = time.time()
         parent = rng.choice(pareto_front(front)).genome
         specs = [(f"g{gen}_{i}", gen * 1000 + i, league.seat(parent, rng, lc.frozen_share, powers))
                  for i in range(lc.games_per_generation)]
-        _progress(f"[gen {gen}] parent {parent.name} ({parent.hash}); playing {len(specs)} games")
+        st.update(f"generation {gen}: playing", f"generation {gen}: playing {len(specs)} game(s) with playbook "
+                  f"{parent.name}", gen=gen, parent=RSIStatus.playbook(parent))
         games = await play_many(specs, llm, cfg, run_dir / f"gen_{gen}" / "games")
         for g in games:
             league.record(g)
 
+        st.update(f"generation {gen}: judge reviewing", f"judge reviewing {len(games)} finished game(s)")
         reviews_list = await asyncio.gather(*(reviewer.review_game(g, parent) for g in games))
         reviews = {g["game_id"]: r for g, r in zip(games, reviews_list)}
         for gid, r in reviews.items():   # next to each game, so the viewer can show it
@@ -137,16 +170,22 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
         ex = exemplar_candidate(parent, mine_exemplars(games, 4, rng, contamination), gen)
         eff = effort_candidate(parent, gen)
         cands += [c for c in (ex, eff) if c is not None]
-        print(f"[gen {gen}] {len(ranked)} diffs kept, {len(rejected)} rejected by lint; "
-              f"{len(cands)} candidates; reviewer leak flags {leak_flags}")
+        st.update(f"generation {gen}: gating", f"judge proposed {len(ranked) + len(rejected)} playbook edit(s): "
+                  f"{len(ranked)} passed lint, {len(rejected)} rejected; testing {len(cands)} candidate playbook(s)",
+                  diffs=[{"op": d.diff.op, "id": d.diff.heuristic_id, "text": d.diff.text, "votes": d.votes,
+                          "why": d.diff.rationale} for d in ranked[:8]])
 
         decisions = []
         for c in cands:
             c.save(run_dir / "genomes")
             d = await gate(c, incumbent, sim_items, val_items, llm, store, lc, run_dir / "gate_log.jsonl")
             decisions.append((c, d))
-            print(f"    {c.name:<22} {c.hash} accepted={d.accepted} "
-                  f"dAUPRC={d.sim['auprc']['delta']:+.3f} p_gain={d.sim['auprc']['p_gain']:.2f} {d.reasons}")
+            st.update(event=f"candidate {c.name}: {'ACCEPTED' if d.accepted else 'rejected'} "
+                            f"(ΔAUPRC {d.sim['auprc']['delta']:+.3f}, p_gain {d.sim['auprc']['p_gain']:.2f})"
+                            + (f" — {'; '.join(d.reasons)}" if d.reasons else ""),
+                      decisions=(st.s.get("decisions", []) + [{"gen": gen, "name": c.name, "hash": c.hash,
+                                 "accepted": d.accepted, "d_auprc": d.sim["auprc"]["delta"],
+                                 "p_gain": d.sim["auprc"]["p_gain"], "reasons": d.reasons}])[-20:])
 
         accepted = [(c, d) for c, d in decisions if d.accepted]
         if accepted:
@@ -156,8 +195,11 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
             cm = bd.sim_metrics["candidate"]
             front.append(FrontEntry(best, cm.get("auprc", 0.0), cm.get("ece", 1.0)))
             (run_dir / "incumbent.json").write_text(best.model_dump_json(indent=2))
+            st.update(event=f"playbook updated → {best.name} ({best.hash}); next games use it",
+                      incumbent=RSIStatus.playbook(best))
         else:
             stale += 1
+            st.update(event=f"generation {gen}: no candidate passed the gate; keeping {incumbent.name}")
         _log(run_dir, "generations.jsonl", {
             "gen": gen, "parent": parent.hash, "incumbent": incumbent.hash, "games": len(games),
             "diffs_kept": len(ranked), "diffs_rejected": len(rejected), "candidates": len(cands),
@@ -168,6 +210,7 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
             break
 
     (run_dir / "final_genome.json").write_text(incumbent.model_dump_json(indent=2))
+    st.update("finished", f"run finished; final playbook {incumbent.name} ({incumbent.hash})")
     print(f"[done] final genome {incumbent.name} ({incumbent.hash})")
     await llm.aclose()
 

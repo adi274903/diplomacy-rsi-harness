@@ -1,0 +1,46 @@
+# Watchable RSI demo: ONE game at a time, 4 countries each played by a different lab's model
+# (OpenRouter), messages streamed as each agent finishes writing. After every game the Opus judge
+# reviews it, proposes playbook edits, the gate tests them, and the next game uses the winner.
+#   scripts/gateways.sh
+#   python -m rsi.loop run --config configs/live_one.yaml --run-name watch1
+#   python -m rsi.viewer serve runs/watch1 --gateway player=http://127.0.0.1:9000 --gateway judge=http://127.0.0.1:9001
+#   open http://127.0.0.1:8765/live
+llm:
+  backend: http
+  base_url: http://127.0.0.1:9000/v1
+  model: thinkingmachines/inkling-2-mini
+  effort_mode: openrouter
+  json_mode: none
+  max_connections: 64
+  max_tokens: {send: 4000, judge: 4000, orders: 4000, item_judge: 3000, review: 8000, text: 400}
+  extra_headers: {X-Title: diplomacy-rsi-harness}
+reviewer_llm:
+  backend: http
+  base_url: http://127.0.0.1:9001/v1
+  model: anthropic/claude-opus-5.5
+  effort_mode: none
+  json_mode: none
+  max_connections: 8
+  max_tokens: {review: 8000, item_judge: 3000, text: 400}
+  extra_headers: {X-Title: diplomacy-rsi-harness}
+game:
+  map_name: standard
+  active_powers: [AUSTRIA, FRANCE, GERMANY, ITALY]
+  power_models:
+    AUSTRIA: thinkingmachines/inkling-2-mini
+    FRANCE: anthropic/claude-haiku-5.5
+    GERMANY: deepseek/deepseek-v4.1-flash
+    ITALY: mistralai/mistral-small-2603
+  end_year: 1903
+  press_rounds: 2
+  max_messages_per_round: 2
+  stream_events: true
+loop:
+  generations: 8
+  games_per_generation: 1
+  parallel_games: 1
+  gate_games: 1
+  candidates: 2
+  patience: 8
+  frozen_share: 0.0
+  sim_gate_truth_ratio: 6
