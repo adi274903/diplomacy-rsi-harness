@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from rsi import decision_graph
 from rsi.genome import Genome
 
 
@@ -92,9 +93,11 @@ def send_task(recipients: list[str], max_messages: int, round_no: int, rounds: i
             "currently intend (plan), and one memory note.")
 
 
-def judge_task(incoming: list[ShownMessage]) -> str:
+def judge_task(incoming: list[ShownMessage], structured: bool = False) -> str:
     lines = ["## Task: JUDGE", "Judge each of these newly received messages (one judgment per msg_id):"]
     lines += [f"[#{m.id}] from {m.sender}: {m.text}" for m in incoming]
+    if structured:
+        lines += ["", decision_graph.INSTRUCTIONS]
     return "\n".join(lines)
 
 
@@ -122,10 +125,14 @@ def item_messages(genome: Genome, item) -> list[dict]:
     if item.sender_sc is not None and item.receiver_sc is not None:
         ctx.append(f"Supply centres: you ({item.receiver}) {item.receiver_sc}, {item.sender} {item.sender_sc}.")
     ctx.append(f"\n## Your conversation with {item.sender} (oldest first)")
+    structured = genome.structured_judgments
     if item.history:
-        ctx += [f"{'you' if s == item.receiver else s}: {t}" for s, t in item.history]
+        ctx += [f"{f'[h{k}] ' if structured else ''}{'you' if s == item.receiver else s}: {t}"
+                for k, (s, t) in enumerate(item.history, 1)]
     else:
         ctx.append("(no earlier messages)")
     task = (f"\n## Task: JUDGE\nYou are {item.receiver}. Judge this newest message from {item.sender}:\n"
             f"{item.target}")
+    if structured:
+        task += "\n\n" + decision_graph.INSTRUCTIONS
     return [system_message(genome), {"role": "user", "content": "\n".join(ctx) + task}]

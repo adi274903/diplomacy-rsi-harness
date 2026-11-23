@@ -38,11 +38,16 @@ class Genome(BaseModel):
                                                              "item_judge": "medium"})
     temperature: float = 1.0
     threshold: float = 0.5
+    # Receivers answer with a decision graph (claims, cited evidence, adjustments): rsi/decision_graph.py
+    structured_judgments: bool = False
 
     # -- identity -------------------------------------------------------------------------------
     def behavior(self) -> dict:
         """Fields that change behaviour (name/lineage excluded), canonicalised for hashing."""
-        return self.model_dump(exclude={"name", "parent", "generation"})
+        out = self.model_dump(exclude={"name", "parent", "generation"})
+        if not out["structured_judgments"]:   # keep hashes (and caches) of existing genomes unchanged
+            del out["structured_judgments"]
+        return out
 
     @property
     def hash(self) -> str:
@@ -155,9 +160,10 @@ PLAYBOOK_V0 = [
 ]
 
 
-def default_genome() -> Genome:
+def default_genome(structured: bool = False) -> Genome:
     return Genome(
         name="v0",
         system_prompt=SYSTEM_PROMPT_V0,
         playbook=[Heuristic(id=f"H{i + 1}", text=t, rationale="seed heuristic") for i, t in enumerate(PLAYBOOK_V0)],
+        structured_judgments=structured,
     )

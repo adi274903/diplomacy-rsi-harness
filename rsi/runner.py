@@ -22,7 +22,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
 
-from rsi import prompts
+from rsi import decision_graph, prompts
 from rsi.agents.player import Player
 from rsi.config import GameConfig
 from rsi.env.bus import Bus, Message
@@ -202,19 +202,25 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                         shown = [m.shown() for m in incoming]
                         task = prompts.judge_task(shown)
                         vault.check(p, view, private + task, cfg.strict_isolation, f"{phase}:judge:{rnd}")
-                        return p, incoming, await _safe(players[p].judge(board, private, shown, phase, rnd), stats)
+                        shown_ids = [x.id for x in view.shown_messages()]
+                        return p, incoming, shown_ids, await _safe(
+                            players[p].judge(board, private, shown, phase, rnd, shown_ids=shown_ids), stats)
 
                     busy([p for p, ms in sent.items() if ms], f"judging received messages (round {rnd})")
                     jobs = [do_judge(p, ms) for p, ms in sent.items() if ms]
-                    async for p, incoming, (turn, meta) in each(jobs):
+                    async for p, incoming, shown_ids, (turn, meta) in each(jobs):
                         got = {j.msg_id: j for j in (turn.judgments if turn else [])}
+                        allowed = {f"#{i}" for i in shown_ids}   # this receiver's own dialogs, incoming included
                         for m in incoming:
                             j = got.get(m.id)
                             if j is None:  # missing judgment: abstain at the prior, flagged
                                 vault.judgments[m.id] = JudgeRecord(m.id, p, 0.5, "trust", "", [], ok=False)
                                 continue
-                            vault.judgments[m.id] = JudgeRecord(m.id, p, j.p_lie, j.decision, j.reasoning,
-                                                                list(j.cues), meta.reasoning if meta else "")
+                            graph = decision_graph.graph_of(j) if hasattr(j, "claims") else None
+                            vault.judgments[m.id] = JudgeRecord(
+                                m.id, p, j.p_lie, j.decision, j.reasoning, list(j.cues),
+                                meta.reasoning if meta else "", graph=graph,
+                                graph_checks=decision_graph.check(graph, allowed) if graph else None)
                             vault.secret(p, j.reasoning, f"judge:{m.id}")
                         if meta:
                             vault.secret(p, meta.reasoning, f"thinking:{phase}:judge:{rnd}")

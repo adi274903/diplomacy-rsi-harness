@@ -112,7 +112,7 @@ def _human_val_items(cfg: Config, splits) -> list:
 
 async def cmd_smoke(cfg: Config, run_dir: Path) -> None:
     llm = make_llm(cfg.llm)
-    v0 = default_genome()
+    v0 = default_genome(structured=cfg.loop.structured_judgments)
     g = await run_game("smoke", cfg.loop.seed, {p: v0 for p in game_powers(cfg.game)}, llm, cfg.game,
                        run_dir / "games", progress=_progress)
     s = g["stats"]
@@ -142,6 +142,8 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
                                 + human_data.all_texts(splits["test"]))
 
     v0 = Genome.load(lc.initial_genome) if lc.initial_genome else default_genome()
+    if lc.structured_judgments:
+        v0 = v0.model_copy(update={"structured_judgments": True})
     v0.save(run_dir / "genomes")
     league = League(v0)
     st = RSIStatus(run_dir)
@@ -274,7 +276,7 @@ async def cmd_final_test(cfg: Config, run_dir: Path, force: bool) -> None:
     store = EvalStore(run_dir / "evals")
     splits = human_data.load_all(cfg.paths.data)
     final = Genome.model_validate_json((run_dir / "final_genome.json").read_text())
-    v0 = default_genome()
+    v0 = default_genome(structured=cfg.loop.structured_judgments)
     val_items = _human_val_items(cfg, splits)
     test_items = human_data.to_items(splits["test"], cfg.game.history_window)
     para_items = await paraphrase_items(llm, test_items, run_dir / "paraphrase_test.json", seed=cfg.loop.seed)

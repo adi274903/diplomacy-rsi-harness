@@ -84,6 +84,9 @@ class LoopConfig(BaseModel):
     # Human-validation transfer check in the gate. Turn off when the starting playbook was learned
     # from the validation split (the check would be optimistic).
     human_val_gate: bool = True
+    # Receivers answer with a decision graph (claims, cited evidence, adjustments); see rsi/decision_graph.py.
+    # Sets Genome.structured_judgments on v0, so every genome descended from it inherits it.
+    structured_judgments: bool = False
     seed: int = 0
 
 

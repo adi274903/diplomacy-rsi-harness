@@ -8,17 +8,22 @@ Rows are the agent-controlled powers. Edges:
     plan      -> message    "wrote"       message composed under that plan (intent = truthful/deceptive)
     message   -> judgment   "judged"      receiver's p_lie / decision on that message
     judgment  -> plan/orders "cited"      the receiver's later reasoning names the sender (evidence quoted)
+    message   -> judgment   "evidence"    the judgment's decision graph cites that message by id (exact,
+                                          only for genomes with structured_judgments)
     plan      -> orders     "kept k/n"    how many planned orders were actually submitted
     orders    -> SC change  "result"
 
 "cited" edges are attributions read off the reasoning traces (the agent says it considered that
-sender), not causal identification. They are what a researcher would follow first when asking
+sender), not causal identification. "evidence" edges are exact: the receiver named the message id in its
+decision graph, and the graph's citation checks run on it (see rsi/decision_graph.py). They are what a researcher would follow first when asking
 "why did this agent act this way?".
 """
 
 from __future__ import annotations
 
 import re
+
+from rsi import decision_graph
 
 COLS = ["plan 1", "messages 1", "judgments 1", "plan 2", "messages 2", "judgments 2", "orders", "SC change"]
 
@@ -64,9 +69,14 @@ def phase_graph(rec: dict, phase: str) -> dict:
             if j:
                 lie, distrust = intent == "deceptive", j["decision"] == "distrust"
                 tone = "good" if lie and distrust else "bad" if lie else "warn" if distrust else ""
+                graph = j.get("graph")
+                checks = j.get("graph_checks") or {}
+                if graph and checks.get("invalid_sources"):
+                    tone = "bad"
                 node(f"judge:{m['id']}", jc, m["recipient"], "judgment", f"p={j['p_lie']:.2f}",
                      f"{m['recipient']} judges #{m['id']} from {m['sender']}: p_lie={j['p_lie']:.2f} "
-                     f"{j['decision']}\ncues: {', '.join(j.get('cues', []))}\n\n{j.get('reasoning', '')}", tone)
+                     f"{j['decision']}\ncues: {', '.join(j.get('cues', []))}\n\n{j.get('reasoning', '')}"
+                     + (f"\n\nDECISION GRAPH:\n{decision_graph.summary(graph, checks)}" if graph else ""), tone)
                 edges.append({"from": f"msg:{m['id']}", "to": f"judge:{m['id']}", "kind": "judged",
                               "label": j["decision"]})
 
@@ -83,6 +93,18 @@ def phase_graph(rec: dict, phase: str) -> dict:
             kept = sum(1 for o in planned if o in orders.get(p, []))
             edges.append({"from": last_plan, "to": f"orders:{p}", "kind": "kept",
                           "label": f"kept {kept}/{len(planned)}"})
+
+    # "evidence" edges: messages a judgment's decision graph cites by id (exact, structured judgments only)
+    ids = {n["id"] for n in nodes}
+    for m in msgs:
+        j = judg.get(m["id"])
+        if not j or not j.get("graph"):
+            continue
+        invalid = set((j.get("graph_checks") or {}).get("invalid_sources", []))
+        for cited in decision_graph.cited_message_ids(j["graph"]):
+            if f"msg:{cited}" in ids and cited != m["id"]:
+                edges.append({"from": f"msg:{cited}", "to": f"judge:{m['id']}", "kind": "evidence",
+                              "label": "cited" + (" (not shown!)" if f"#{cited}" in invalid else "")})
 
     # "cited" edges: a judgment's receiver later reasons about that sender
     for m in msgs:
