@@ -165,7 +165,7 @@ async def main_async(a) -> None:
     seat = HumanSeat(me, genome.model_copy(update={"name": "human"}), timeout_s=a.turn_seconds)
     state = PlayState(seat, run_dir, "play", {me: "you", **models})
 
-    srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(state))
+    srv = ThreadingHTTPServer((a.host, a.port), make_handler(state))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     _progress(f"[play] you are {me}; opponents: " + ", ".join(f"{p}={short_model(m)}" for p, m in models.items()))
     _progress(f"[play] open http://127.0.0.1:{a.port}/ui/play/  (each move times out after {a.turn_seconds:.0f}s)")
@@ -200,6 +200,7 @@ def main() -> None:
     ap.add_argument("--months", type=int, default=12, help="game length in months (3-month steps)")
     ap.add_argument("--turn-seconds", type=float, default=600, help="time you have for each move")
     ap.add_argument("--port", type=int, default=8770)
+    ap.add_argument("--host", default="127.0.0.1", help="bind address (0.0.0.0 inside a container)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--review", action=argparse.BooleanOptionalAction, default=True,
                     help="have the judge model review the game afterwards")

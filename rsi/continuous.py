@@ -104,6 +104,14 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
     _log(run_dir, {"event": "start", **versions[0]})
     lengths = [rng.choice(LENGTHS) for _ in range(n_games)]
     counter = {"next": n_games}
+    verified = Path("knowledge/results/2026-11-22-test-human_v2-vs-v0.json")
+    if verified.exists() and start.hash == json.loads(verified.read_text()).get("final"):
+        t = json.loads(verified.read_text())
+        a0, a1 = t["results"]["v0"]["test"], t["results"][t["final_name"]]["test"]
+        st.update(event=f"starting point = Opus's playbook {start.name}, verified on held-out human test: AUPRC "
+                        f"{a1['auprc']:.3f} (v0 {a0['auprc']:.3f}), AUROC {a1['auroc']:.3f} (v0 {a0['auroc']:.3f}), "
+                        f"ECE {a1['ece']:.3f} (v0 {a0['ece']:.3f}); human receivers AUROC "
+                        f"{t['human_receivers']['auroc']:.3f}", opus_baseline=t)
     st.update("playing", f"{n_games} game slots started (lengths {sorted(lengths)} months)"
                          + (f"; continuous until ${stop_usd:.0f} or a STOP file" if forever else "")
                          + f"; playbook v0 = {start.name}, "

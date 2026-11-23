@@ -433,7 +433,7 @@ def _current_game(run_dir: Path) -> str | None:
 WEB_ROOT = Path(__file__).resolve().parents[1] / "web"
 
 
-def serve(run_dir: Path, port: int, gateways: dict[str, str], dev: bool = False) -> None:
+def serve(run_dir: Path, port: int, gateways: dict[str, str], dev: bool = False, host: str = "127.0.0.1") -> None:
     build_index(run_dir)
     lock = threading.Lock()
 
@@ -549,7 +549,7 @@ def serve(run_dir: Path, port: int, gateways: dict[str, str], dev: bool = False)
                             pass
             super().do_GET()
 
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv = ThreadingHTTPServer((host, port), Handler)
     print(f"viewer: http://127.0.0.1:{port}/  ·  live game: http://127.0.0.1:{port}/live  "
           f"(run {run_dir}; gateways: {gateways or 'none'})")
     srv.serve_forever()
@@ -562,12 +562,13 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--gateway", action="append", default=[], help="name=http://host:port (repeatable)")
     ap.add_argument("--dev", action="store_true", help="re-import rsi/webapi.py on every /api/x request")
+    ap.add_argument("--host", default="127.0.0.1", help="bind address (0.0.0.0 inside a container)")
     a = ap.parse_args()
     run_dir = Path(a.run_dir)
     if a.command == "build":
         print(build_index(run_dir))
     else:
-        serve(run_dir, a.port, dict(g.split("=", 1) for g in a.gateway), dev=a.dev)
+        serve(run_dir, a.port, dict(g.split("=", 1) for g in a.gateway), dev=a.dev, host=a.host)
 
 
 if __name__ == "__main__":

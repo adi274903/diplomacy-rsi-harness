@@ -166,6 +166,11 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
             season, year, ptype = env.phase_parts()
             board = prompts.board_block(phase, env.units(), env.centers(), env.last_orders, env.last_phase)
             boards[phase] = board
+            for g in {id(pl.genome): pl.genome for pl in players.values()}.values():
+                vault.add_public(prompts.system_message(g)["content"])
+            vault.add_public(prompts.send_task([], cfg.max_messages_per_round, 1, cfg.press_rounds))
+            vault.add_public(prompts.judge_task([]))
+            vault.add_public(prompts.orders_task({}))
             if cfg.render_maps and cfg.render_phase_start:   # current position, before anyone moves
                 svg = await asyncio.to_thread(env.render_svg)
                 if svg:
@@ -195,7 +200,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                             done(p)
                             continue
                         vault.secret(p, turn.analysis, f"analysis:{phase}:{rnd}")
-                        vault.secret(p, meta.reasoning, f"thinking:{phase}:send:{rnd}")
+                        vault.trace(p, meta.reasoning, f"thinking:{phase}:send:{rnd}")
                         vault.memory[p].append(turn.memory)
                         vault.secret(p, turn.memory, f"memory:{phase}:{rnd}")
                         note(phase, p, f"send{rnd}_analysis", turn.analysis)
@@ -244,7 +249,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                             judge_genome[m.id] = players[p].genome.hash
                             vault.secret(p, j.reasoning, f"judge:{m.id}")
                         if meta:
-                            vault.secret(p, meta.reasoning, f"thinking:{phase}:judge:{rnd}")
+                            vault.trace(p, meta.reasoning, f"thinking:{phase}:judge:{rnd}")
                         done(p)
                     checkpoint()
                     if max_months and rnd == 1:
@@ -282,7 +287,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                     vault.secret(p, turn.reasoning, f"orders_reasoning:{phase}")
                     note(phase, p, "orders_reasoning", turn.reasoning)
                 if meta:
-                    vault.secret(p, meta.reasoning, f"thinking:{phase}:orders")
+                    vault.trace(p, meta.reasoning, f"thinking:{phase}:orders")
                     note(phase, p, "orders_thinking", meta.reasoning)
                 done(p)
             vault.orders[phase] = submitted

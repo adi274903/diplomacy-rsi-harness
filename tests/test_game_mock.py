@@ -62,3 +62,15 @@ def test_vault_structural_check():
     view = prompts.PlayerView(power="ENGLAND", units=[], centers=[], memory=[], dialogs={"FRANCE": [m]})
     with pytest.raises(IsolationError):
         v.check("ENGLAND", view, "", True, "test")
+
+
+def test_restated_instructions_are_not_secrets():
+    """Agents restating shared instructions must not trigger the leak guard (false positives)."""
+    v = Vault()
+    v.add_public("Judge each of these newly received messages (one judgment per msg_id):")
+    v.secret("ITALY", "Judge each of these newly received messages (one judgment per msg_id):", "judge:1")
+    view = prompts.PlayerView(power="GERMANY", units=[], centers=[], memory=[], dialogs={})
+    v.check("GERMANY", view, "## Task: JUDGE\nJudge each of these newly received messages (one judgment per msg_id):",
+            True, "test")
+    v.trace("ITALY", "I will secretly attack Munich next spring no matter what.", "thinking:x")
+    v.check("GERMANY", view, "I will secretly attack Munich next spring no matter what.", True, "test")

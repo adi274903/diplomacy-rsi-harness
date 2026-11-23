@@ -59,6 +59,7 @@ class Vault:
     traces: list[dict] = field(default_factory=list)                              # every private text, tagged
     leak_hits: list[dict] = field(default_factory=list)
     min_secret_len: int = 24
+    public_text: str = ""     # lowercased shared prompt text (system prompt, playbook, task templates)
     powers: list[str] = field(default_factory=lambda: list(POWERS))
 
     def __post_init__(self) -> None:
@@ -67,6 +68,21 @@ class Vault:
             self.memory.setdefault(p, [])
 
     # -- registration -----------------------------------------------------------------------------
+    def add_public(self, text: str) -> None:
+        """Register shared prompt text (identical for every player) so it is never treated as a secret."""
+        t = text.lower()
+        if t not in self.public_text:
+            self.public_text += "\n" + t
+
+    def trace(self, owner: str, text: str, tag: str) -> None:
+        """Record a private native-thinking trace for the reviewer and viewer without guarding it:
+        thinking restates prompts and quotes received messages so freely that, as a leak pattern,
+        it only yields false positives. Leaks of real private artefacts (analysis, memory, judge and
+        orders reasoning, other pairs' messages) are still guarded, and dialog access is checked
+        structurally."""
+        if text:
+            self.traces.append({"owner": owner, "tag": tag, "text": text})
+
     def secret(self, owner: str, text: str, tag: str) -> None:
         """Register private text of `owner`; every other power's guard learns it, sentence by
         sentence, so a partial leak of a long trace is still caught."""
@@ -75,6 +91,11 @@ class Vault:
         self.traces.append({"owner": owner, "tag": tag, "text": text})
         pieces = [s.strip() for s in _SENTENCE.split(text)]
         pieces = [s for s in pieces if len(s) >= self.min_secret_len] or [text]
+        # A sentence every player already sees in the shared prompt (agents often restate their
+        # instructions or the playbook) is not a secret; guarding it only produces false leaks.
+        pieces = [s for s in pieces if s.lower() not in self.public_text]
+        if not pieces:
+            return
         for p in self.powers:
             if p != owner:
                 for s in pieces:
