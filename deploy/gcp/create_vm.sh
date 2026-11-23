@@ -36,5 +36,5 @@ gcloud compute instances create "$VM" --zone "$ZONE" --machine-type "$MACHINE" \
   --image-family debian-12 --image-project debian-cloud --boot-disk-size 30GB \
   --service-account "$SA" --scopes cloud-platform --tags rsi-backend \
   --metadata-from-file startup-script=deploy/gcp/startup.sh \
-  --metadata "rsi-repo=$REPO,rsi-bg=${RSI_BG:-1},bg-stop-usd=${BG_STOP_USD:-28}"
+  --metadata "rsi-repo=$REPO,rsi-bg=${RSI_BG:-1},bg-stop-usd=${BG_STOP_USD:-28},rsi-replay=${RSI_REPLAY:-0}"
 echo "done. First boot builds the image (~5-8 min). Then: deploy/gcp/tunnel.sh"

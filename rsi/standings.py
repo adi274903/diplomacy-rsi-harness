@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from pathlib import Path
+from rsi.replay import is_replay
 
 
 def short_model(m: str | None) -> str:
@@ -53,6 +54,8 @@ def standings(run_dir: str | Path) -> dict:
     by_country: dict[str, dict] = defaultdict(lambda: defaultdict(float))
     countries_played: dict[str, dict] = defaultdict(lambda: defaultdict(int))
     for f in sorted(run_dir.rglob("game_*.json"), key=lambda p: p.stat().st_mtime):
+        if is_replay(f, run_dir):
+            continue
         try:
             rec = json.loads(f.read_text())
         except ValueError:

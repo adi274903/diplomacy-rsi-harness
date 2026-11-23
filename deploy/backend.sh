@@ -2,7 +2,8 @@
 # Container entrypoint: three capped gateways, the dashboard/live-game server, and (optionally) the
 # continuous background RSI loop. State lives in /data (a persistent disk on the VM).
 set -euo pipefail
-: "${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}"
+REPLAY="${RSI_REPLAY:-0}"   # 1 = replay recorded games only: no gateways, no model calls, $0 API spend
+[ "$REPLAY" = "1" ] || : "${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}"
 BASE=https://openrouter.ai/api/v1
 RUN="${RSI_RUN:-rsi_bg}"
 mkdir -p /data/runs /data/data
@@ -14,6 +15,12 @@ gw() {  # name port usd_budget max_inflight
     --cache-path "/data/runs/cache-$1.bin" --cache-namespace "$1" --max-inflight "$4" --usd-budget "$3" \
     --usd-per-mtok-in 0.15 --usd-per-mtok-out 0.6 &
 }
+if [ "$REPLAY" = "1" ]; then
+  mkdir -p "runs/$RUN"
+  python -m rsi.replay "runs/$RUN" ${REPLAY_SOURCE:+--source "$REPLAY_SOURCE"} --seed 0 > "runs/replay.log" 2>&1 &
+  exec python -m rsi.viewer serve "runs/$RUN" --host 0.0.0.0 --port 8765 --dev
+fi
+
 gw player 9000 "${BG_PLAYER_USD:-12}" 96
 gw judge  9001 "${BG_JUDGE_USD:-18}"  12
 gw play   9002 "${PLAY_USD:-10}"      16

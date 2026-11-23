@@ -45,7 +45,7 @@ Details, caveats and what did not work are in the [technical report](docs/TECHNI
 | [Example game played with rsi-v1](https://34-59-183-174.sslip.io/ui/game/?f=/games/game_v1demo.html) | 43 messages, 5 lies, 4 caught ([decision-trace graph](https://34-59-183-174.sslip.io/games/game_v1demo.html)) |
 | [Play against the models](https://34-59-183-174.sslip.io/ui/play/) | You take a country; the models play the rest (password-protected) |
 
-The deployment is in dashboard-only mode. Live games need API budget (see [Deployment](#deployment)).
+The deployment runs in **replay mode**: the live game view plays back recorded games message by message, with no model calls, so the public demo costs $0 in API credit. New live games need API budget (see [Deployment](#deployment)); the play page needs it too.
 
 <details>
 <summary><b>More screenshots</b></summary>
@@ -143,6 +143,7 @@ sequenceDiagram
 | `rsi/causal.py`, `rsi/decision_graph.py` | Decision-trace graphs; optional structured judgments |
 | `rsi/human_data.py`, `rsi/contamination.py` | Benchmark loader; n-gram dedup, memorisation probe, paraphrase test |
 | `rsi/viewer.py`, `rsi/webapi.py`, `rsi/play.py` | Dashboard server and APIs; live-play server |
+| `rsi/replay.py` | Replays recorded games as if live, with no model calls (the $0 public demo) |
 | `web/game`, `web/rsi`, `web/play` | Spectator UI, RSI dashboard, play page |
 | `crates/rsi-gateway` | Rust OpenAI-compatible gateway and load generator |
 | `crates/rsi-core` | Rust (PyO3): weighted metrics, paired cluster bootstrap, n-gram index, Aho-Corasick leak guard |

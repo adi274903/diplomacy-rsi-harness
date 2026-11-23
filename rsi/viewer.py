@@ -24,6 +24,7 @@ from pathlib import Path
 import httpx
 
 from rsi.causal import game_graphs
+from rsi.replay import is_replay
 
 CSS = """
 :root{--bg:#f7f7f5;--panel:#fff;--ink:#1d1d1f;--muted:#6b6b70;--line:#e3e3e0;--accent:#2f5bd3;
@@ -350,7 +351,7 @@ if (document.querySelector('td .live')) setTimeout(() => location.reload(), 8000
 def build_index(run_dir: Path) -> Path:
     global _RUN_ROOT
     _RUN_ROOT = run_dir
-    games = sorted(run_dir.rglob("game_*.json"))
+    games = sorted(g for g in run_dir.rglob("game_*.json") if not is_replay(g, run_dir))
     rows = []
     for g in games:
         page = build_game_page(g)

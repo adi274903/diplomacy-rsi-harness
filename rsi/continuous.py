@@ -118,6 +118,8 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
     if seed_history:   # past games (e.g. earlier runs copied to the VM) go straight into Opus's review queue
         past = []
         for f in Path(seed_history).rglob("game_*.json"):
+            if "replay" in f.parts:
+                continue
             try:
                 r = json.loads(f.read_text())
             except ValueError:
