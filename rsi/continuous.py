@@ -75,7 +75,7 @@ async def _spend(cfg: Config) -> float:
 
 async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int, select_games: list[int],
                    report_games: list[int], truth_ratio: int, forever: bool = False,
-                   stop_usd: float = 0.0) -> None:
+                   stop_usd: float = 0.0, seed_history: str | None = None, seed_max: int = 8) -> None:
     """`forever`: keep `n_games` slots busy, starting a new game whenever one finishes, until spend reaches
     `stop_usd` or a STOP file appears in the run directory; then finish running games and report."""
     lc = cfg.loop
@@ -104,6 +104,20 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
     _log(run_dir, {"event": "start", **versions[0]})
     lengths = [rng.choice(LENGTHS) for _ in range(n_games)]
     counter = {"next": n_games}
+    if seed_history:   # past games (e.g. earlier runs copied to the VM) go straight into Opus's review queue
+        past = []
+        for f in Path(seed_history).rglob("game_*.json"):
+            try:
+                r = json.loads(f.read_text())
+            except ValueError:
+                continue
+            if r.get("status") == "finished" and not r.get("error") and len(r.get("messages", [])) >= 20:
+                r["game_id"] = f"hist_{f.parent.parent.name}_{r['game_id']}"
+                past.append((f.stat().st_mtime, r))
+        seeded = [r for _, r in sorted(past, key=lambda x: -x[0])[:seed_max]]
+        s["queue"].extend(seeded)
+        st.update(event=f"history: queued {len(seeded)} past game(s) from {seed_history} "
+                        f"({sum(len(r['messages']) for r in seeded)} messages) for Opus's first review")
     verified = Path("knowledge/results/2026-11-22-test-human_v2-vs-v0.json")
     if verified.exists() and start.hash == json.loads(verified.read_text()).get("final"):
         t = json.loads(verified.read_text())
@@ -217,6 +231,8 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
             st.update(event=f"slot freed: starting game g{i:02d} with playbook v{s['version']} "
                             f"(${spent:.2f} spent so far)")
 
+    if s["queue"]:
+        asyncio.get_running_loop().create_task(update())   # review the history while the new games play
     nested = await asyncio.gather(*(slot(i) for i in range(n_games)), return_exceptions=True)
     results = [x for n in nested for x in (n if isinstance(n, list) else [n])]
     fatal = [x for x in results if isinstance(x, EvalIncomplete)]
@@ -258,6 +274,8 @@ def main() -> None:
     ap.add_argument("--truth-ratio", type=int, default=2)
     ap.add_argument("--forever", action="store_true", help="keep slots busy until --stop-usd or a STOP file")
     ap.add_argument("--stop-usd", type=float, default=0.0, help="soft budget: no new games once spend reaches it")
+    ap.add_argument("--seed-history", default=None, help="dir of past runs whose games Opus reviews first")
+    ap.add_argument("--seed-max", type=int, default=8)
     ap.add_argument("--mock", action="store_true")
     a = ap.parse_args()
     cfg = load_config(a.config)
@@ -272,7 +290,8 @@ def main() -> None:
     (run_dir / "config.json").write_text(cfg.model_dump_json(indent=2))
     try:
         asyncio.run(run_pool(cfg, run_dir, a.games, a.batch_messages, [int(x) for x in a.select_games.split(",")],
-                             [int(x) for x in a.report_games.split(",")], a.truth_ratio, a.forever, a.stop_usd))
+                             [int(x) for x in a.report_games.split(",")], a.truth_ratio, a.forever, a.stop_usd,
+                             a.seed_history, a.seed_max))
     except EvalIncomplete as e:
         raise SystemExit(f"[abort] judge calls are failing; no verdict can be trusted: {e}") from e
 
