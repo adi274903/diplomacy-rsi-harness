@@ -13,6 +13,29 @@ A harness for recursive self-improvement on reasoning-traced trust decisions in 
 - **Play against the models:** https://34-59-183-174.sslip.io/ui/play/. Password-protected.
 - **Example game played entirely with rsi-v1:** https://34-59-183-174.sslip.io/ui/game/?f=/games/game_v1demo.html. 21 months, 43 messages, 5 lies, **4 caught**. Its decision-trace graph is at https://34-59-183-174.sslip.io/games/game_v1demo.html.
 
+### Screenshots
+
+**Live game view.** A finished game played entirely with playbook rsi-v1. Each country is played by a different model, and the page shows each sender's private intent, the receiver's lie probability, and the outcome.
+![Live game view](docs/screenshots/live-game.png)
+
+**Playbook evolution.** Opus's rewrite rsi-v1 was accepted by the gate:
+- ΔAUPRC +0.035 [+0.003, +0.076], p_gain 0.99
+- Δ lie-F1 +0.080
+
+The page also shows the heuristics Opus added and the candidates the gate rejected.
+![Playbook update history](docs/screenshots/playbook.png)
+
+**Decision-trace graph.** Each row is a country. The graph links plan → message → judgment → the later reasoning that cites it. Deceptive messages are marked caught or fooled.
+![Decision graph explorer](docs/screenshots/decision-graph.png)
+
+**Standings.** Over 101 games, models rotate between countries, so model strength is separated from starting position:
+- leaderboards by model and by country
+- deception stats
+- lie-F1 per model
+![Standings](docs/screenshots/standings.png)
+
+Try it yourself: **https://34-59-183-174.sslip.io/ui/rsi/**
+
 These run on a Compute Engine VM in project `rsitry` (see [deploy/gcp/README.md](deploy/gcp/README.md)). The dashboards show the run where Opus's self-play refinement **rsi-v1** was accepted, at 99% gate confidence:
 - gate AUPRC 0.107 → 0.142
 - lie-F1 0.072 → 0.152
