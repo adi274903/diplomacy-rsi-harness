@@ -69,6 +69,14 @@ class LoopConfig(BaseModel):
     human_val_tolerance: float = 0.01
     human_val_truth_ratio: int = 4     # truths sampled per lie in the human val gate set
     sim_gate_truth_ratio: int = 4
+    # Which item set the acceptance gate's AUPRC/ECE test runs on (the human-val transfer check is unchanged):
+    #   sim         -> receiver-seat replays of frozen self-play gate games (original behaviour)
+    #   human_train -> human TRAIN games `human_gate_games` (all lies + human_gate_truth_ratio truths per lie)
+    #   auto        -> sim, unless the sim gate set has fewer than `min_gate_lies` lies
+    gate_source: Literal["sim", "human_train", "auto"] = "sim"
+    human_gate_games: list[int] = Field(default_factory=lambda: [7, 8, 9, 10])
+    human_gate_truth_ratio: int = 5
+    min_gate_lies: int = 20
     frozen_share: float = 0.5          # share of seats given to frozen league members
     label_mode: Literal["intent", "promise", "either"] = "intent"
     # Start from a saved genome (e.g. playbooks/human_v1.json) instead of the built-in v0.

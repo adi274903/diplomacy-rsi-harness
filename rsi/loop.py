@@ -23,7 +23,7 @@ from rsi.contamination import build_index, memorization_probe, overlap_report, p
 from rsi.env.game import game_powers
 from rsi.evolve import (FrontEntry, aggregate_diffs, effort_candidate, exemplar_candidate, mine_exemplars,
                         pareto_front, propose_candidates)
-from rsi.gate import gate
+from rsi.gate import choose_gate_set, gate
 from rsi.genome import Genome, default_genome
 from rsi.judge import EvalStore, balance, items_from_game, judge_items
 from rsi.league import League
@@ -166,14 +166,27 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
         lc.sim_gate_truth_ratio, lc.seed)
     n_lies = sum(it.is_lie for it in sim_items)
     print(f"[gate] {len(sim_items)} sim gate items ({n_lies} lies), {len(val_items)} human-val items")
-    if n_lies < 10:
-        print("  ! very few self-labelled lies in gate games; the sim gate will be noisy")
+    primary_set = choose_gate_set(lc.gate_source, n_lies, lc.min_gate_lies)
+    if primary_set == "human_train_gate":
+        gate_items = human_data.train_gate_items(splits, lc.human_gate_games, cfg.game.history_window,
+                                                 lc.human_gate_truth_ratio, lc.seed)
+        # never let a playbook edit copy text from the games that judge it
+        contamination = build_index(human_data.all_texts(splits["validation"]) + human_data.all_texts(splits["test"])
+                                    + [it.target for it in gate_items])
+        print(f"[gate] primary gate: human TRAIN games {lc.human_gate_games}: {len(gate_items)} items "
+              f"({sum(it.is_lie for it in gate_items)} lies)"
+              + (f"; sim gate has {n_lies} lies < min_gate_lies {lc.min_gate_lies}" if lc.gate_source == "auto" else ""))
+    else:
+        gate_items = sim_items
+        if n_lies < 10:
+            print("  ! very few self-labelled lies in gate games; the sim gate will be noisy "
+                  "(set loop.gate_source: auto to fall back to human train games)")
 
-    res0 = await store.get(v0, "sim_gate", sim_items, llm)
-    m0 = evaluate(sim_items, res0, v0.threshold)
+    res0 = await store.get(v0, primary_set, gate_items, llm)
+    m0 = evaluate(gate_items, res0, v0.threshold)
     front = [FrontEntry(v0, m0.get("auprc", 0.0), m0.get("ece", 1.0))]
     incumbent, stale = v0, 0
-    _log(run_dir, "generations.jsonl", {"gen": 0, "incumbent": v0.hash, "sim_gate": m0})
+    _log(run_dir, "generations.jsonl", {"gen": 0, "incumbent": v0.hash, "sim_gate": m0, "gate_set": primary_set})
     st.update("baseline", f"v0 baseline on the gate: AUPRC {m0.get('auprc', float('nan')):.3f}, "
                           f"ECE {m0.get('ece', float('nan')):.3f} ({m0.get('n_lie', 0)} lies / {m0.get('n', 0)} items)",
               baseline=m0)
@@ -215,7 +228,8 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
         decisions = []
         for c in cands:
             c.save(run_dir / "genomes")
-            d = await gate(c, incumbent, sim_items, val_items, llm, store, lc, run_dir / "gate_log.jsonl")
+            d = await gate(c, incumbent, gate_items, val_items, llm, store, lc, run_dir / "gate_log.jsonl",
+                           primary_set=primary_set)
             decisions.append((c, d))
             st.update(event=f"candidate {c.name}: {'ACCEPTED' if d.accepted else 'rejected'} "
                             f"(ΔAUPRC {d.sim['auprc']['delta']:+.3f}, p_gain {d.sim['auprc']['p_gain']:.2f})"
