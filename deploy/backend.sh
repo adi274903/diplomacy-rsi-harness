@@ -28,5 +28,5 @@ if [ "${RSI_BG:-1}" = "1" ]; then
   until [ -d "runs/$RUN" ]; do sleep 1; done
 fi
 mkdir -p "runs/$RUN"
-exec python -m rsi.viewer serve "runs/$RUN" --host 0.0.0.0 --port 8765 \
+exec python -m rsi.viewer serve "runs/$RUN" --host 0.0.0.0 --port 8765 --dev \
   --gateway player=http://127.0.0.1:9000 --gateway judge=http://127.0.0.1:9001

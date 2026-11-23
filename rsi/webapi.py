@@ -109,9 +109,10 @@ _ID_RX = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 
 def _game_files(run_dir: Path) -> dict[str, tuple[str | int, Path]]:
-    """game id -> (generation or "gate", path). Only gate_games/ and gen_<N>/games/ are scanned."""
+    """game id -> (generation, "gate" or "live", path)."""
     out: dict[str, tuple[str | int, Path]] = {}
-    dirs: list[tuple[str | int, Path]] = [("gate", run_dir / "gate_games")]
+    # gate_games/ + gen_<N>/games/ (generational runs) and games/ (continuous / cadence runs)
+    dirs: list[tuple[str | int, Path]] = [("gate", run_dir / "gate_games"), ("live", run_dir / "games")]
     for d in sorted(run_dir.glob("gen_*")):
         m = re.fullmatch(r"gen_(\d+)", d.name)
         if m and d.is_dir():
