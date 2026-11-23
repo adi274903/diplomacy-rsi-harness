@@ -52,16 +52,57 @@ The deployment is in dashboard-only mode. Live games need API budget (see [Deplo
 
 ## How it works
 
+```mermaid
+flowchart LR
+    PB[("📘 <b>Playbook</b><br/>v0 → v1 → v2 …<br/><small>trust-assessment heuristics<br/>read by every agent</small>")]
+    SP["🎲 <b>1 · Self-play</b><br/><small>10 games in parallel<br/>random length 3–24 months<br/>4 similar-size models, random seats<br/>each turn: SEND → JUDGE → ORDERS</small>"]
+    RV["🔍 <b>2 · Opus review</b><br/><small>Claude Opus 5.5 sees private intents,<br/>plans, real orders and the<br/>decision-trace graphs; proposes<br/>≤ 3 playbook edits per game</small>"]
+    LT["🧹 <b>3 · Lint</b><br/><small>no game specifics<br/>no overlap with held-out<br/>human text</small>"]
+    GT{"⚖️ <b>4 · Gate</b><br/><small>human games 7–8<br/>judged by Inkling 2 Small<br/>paired cluster bootstrap</small>"}
+    LOG["🗂️ gate log"]
+
+    PB ==>|"loaded into<br/>every agent"| SP
+    SP ==>|"finished games<br/>≥ 40 messages"| RV
+    RV ==>|"edits"| LT
+    LT ==>|"candidate<br/>playbooks"| GT
+    GT ==>|"✅ AUPRC gain ≥ bar, ECE not worse<br/>new version goes live in every running game"| PB
+    GT -.->|"❌ rejected"| LOG
+
+    classDef play fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    classDef rev fill:#ede9fe,stroke:#7c3aed,color:#0f172a
+    classDef lint fill:#e0f2fe,stroke:#0284c7,color:#0f172a
+    classDef gate fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef pb fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef muted fill:#f1f5f9,stroke:#94a3b8,color:#475569
+    class SP play
+    class RV rev
+    class LT lint
+    class GT gate
+    class PB pb
+    class LOG muted
 ```
- game slots (parallel, random length, models randomly seated)  ──►  finished games + decision graphs
-      ▲  every agent reads the current playbook                              │
-      │                                                                      ▼
- accepted playbook goes live in all running games        Claude Opus 5.5 reviews them (privileged view)
-      ▲                                                                      │  proposes playbook edits
-      │                                                                      ▼
- gate: paired cluster bootstrap on human games 7–8  ◄──  lint (no game specifics, no held-out overlap)
-       (Inkling 2 Small judges; AUPRC gain + ECE check)
+
+<details>
+<summary><b>One season of play, step by step</b></summary>
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Sender agent
+    participant V as Vault + leak guard
+    participant R as Receiver agent
+    participant E as Diplomacy engine
+    Note over S,R: One 6-month season (two press rounds, then orders)
+    S->>V: message + private intent (truthful / deceptive) + planned orders
+    V-->>V: store private fields · check receiver prompt for leaks
+    V->>R: message text only
+    R->>V: judgment: p_lie, trust / distrust, reasoning
+    S->>E: orders
+    R->>E: orders
+    E-->>V: resolved board · promises kept or broken
+    Note over V: Privileged record → Opus review + decision-trace graph
 ```
+</details>
 
 - **Players** are four similar-size open reasoning models, rotated across countries every game: Inkling 2 Mini, Qwen3.6-35B-A3B, Gemma 4 26B-A4B and Nemotron 3 Nano 30B-A3B.
 - **Isolation:** every prompt is checked so a player only sees its own conversations. A game with any leak is discarded.
@@ -148,6 +189,39 @@ Other entry points:
 **Budget note:** OpenRouter reserves `max_tokens × price` for every in-flight request. Low-credit or workspace-capped keys reject parallel calls (402/403). The harness detects this and stops rather than recording failed calls as results.
 
 ## Deployment
+
+```mermaid
+flowchart LR
+    U["👥 Anyone<br/>browser"] -->|HTTPS| CA["Caddy<br/><small>auto TLS</small>"]
+    A["🔑 Admin"] -->|"IAP tunnel"| VM
+    subgraph VM["GCP VM · rsi-backend"]
+        direction TB
+        CA -->|"/ui/rsi · /ui/game<br/>public, read-only"| VW["Dashboard server<br/>:8765"]
+        CA -->|"/ui/play<br/>password"| PL["Play server<br/>:8770"]
+        subgraph C["Docker container"]
+            VW
+            PL
+            LP["Continuous RSI loop"]
+            GW["Rust gateways<br/><small>cache · spend caps · retries</small>"]
+        end
+        LP --> GW
+        PL --> GW
+        DK[("Persistent disk<br/>runs · playbooks · history")]
+        C --- DK
+    end
+    SM["Secret Manager<br/>OpenRouter key"] -.-> GW
+    GW -->|"model calls"| OR["OpenRouter<br/><small>players · judge · Opus</small>"]
+    classDef ext fill:#f1f5f9,stroke:#475569,color:#0f172a
+    classDef svc fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    classDef core fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef sec fill:#fef3c7,stroke:#d97706,color:#0f172a
+    class U,A,OR ext
+    class CA,VW,PL svc
+    class LP,GW core
+    class SM,DK sec
+    style VM fill:#f8fafc,stroke:#94a3b8,color:#0f172a
+    style C fill:#eff6ff,stroke:#93c5fd,color:#1e3a8a
+```
 
 One container runs everything: gateways, loop, dashboards and play server. `deploy/gcp/` sets it up on a Compute Engine VM:
 - the API key in Secret Manager

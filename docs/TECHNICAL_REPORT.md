@@ -48,6 +48,25 @@ Peskov et al. 2020, *It Takes Two to Lie: One to Lie, and One to Listen* ([data]
 | validation | 11 | 21 | 1,416 | 56 | 4.0% | 8.0% |
 | test | 4, 12 | 42 | 2,741 | 240 | 8.8% | 20.3% |
 
+```mermaid
+flowchart LR
+    D[("Peskov et al. 2020<br/>12 human games · 17k messages")]
+    D --> L["Games 1–3, 5, 6, 11<br/><b>Opus learns the playbook</b>"]
+    D --> G["Games 7–8<br/><b>Gate</b> · selects candidates"]
+    D --> C["Games 9–10<br/><b>Clean report</b> · never selected on"]
+    D --> T["Games 4, 12<br/><b>Held-out test</b> · used once"]
+    classDef src fill:#f1f5f9,stroke:#475569,color:#0f172a
+    classDef a fill:#ede9fe,stroke:#7c3aed,color:#0f172a
+    classDef b fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef c fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    classDef d fill:#fee2e2,stroke:#dc2626,color:#0f172a
+    class D src
+    class L a
+    class G b
+    class C c
+    class T d
+```
+
 **How each split is used:**
 
 | Use | Games | Notes |
@@ -69,24 +88,56 @@ Peskov et al. 2020, *It Takes Two to Lie: One to Lie, and One to Listen* ([data]
 
 ## 3. System architecture
 
-```
-                 ┌───────────────────────── playbook (genome): system prompt + heuristics + exemplars ─────────────┐
-                 ▼                                                                                                 │
-  game slots (N in parallel, random length 3–24 months, random seating of 4 models)                               │
-     MILA `diplomacy` adjudicator · private bilateral message bus · private vault                                   │
-     per turn: SEND (message + private intent + plan) → JUDGE (p_lie + reasoning) → ORDERS                         │
-     every player prompt passes a structural + Aho-Corasick leak check before it is sent                           │
-          │ finished games (≥ 40 new messages)                                                                     │
-          ▼                                                                                                        │
-  Opus 5.5 reviewer (privileged: intents, plans, actual orders, judgments, decision-trace graph)                  │
-     grades each judgment · flags promises kept/broken · flags leaked reasoning · proposes ≤ 3 playbook edits     │
-          ▼                                                                                                        │
-  lint (no game specifics, no n-gram overlap with held-out human text) → vote → candidate playbooks                │
-          ▼                                                                                                        │
-  gate on human games 7–8, judged by Inkling 2 Small: paired cluster bootstrap on AUPRC (p_gain ≥ bar), ECE check ─┘
-          (accepted → new version, live in every running game from the next message)
+**The improvement loop**
 
-  all model calls ──► Rust rsi-gateway (cache, budget, retries, priority) ──► OpenRouter
+```mermaid
+flowchart LR
+    PB[("📘 <b>Playbook</b><br/>v0 → v1 → v2 …<br/><small>trust-assessment heuristics<br/>read by every agent</small>")]
+    SP["🎲 <b>1 · Self-play</b><br/><small>10 games in parallel<br/>random length 3–24 months<br/>4 similar-size models, random seats<br/>each turn: SEND → JUDGE → ORDERS</small>"]
+    RV["🔍 <b>2 · Opus review</b><br/><small>Claude Opus 5.5 sees private intents,<br/>plans, real orders and the<br/>decision-trace graphs; proposes<br/>≤ 3 playbook edits per game</small>"]
+    LT["🧹 <b>3 · Lint</b><br/><small>no game specifics<br/>no overlap with held-out<br/>human text</small>"]
+    GT{"⚖️ <b>4 · Gate</b><br/><small>human games 7–8<br/>judged by Inkling 2 Small<br/>paired cluster bootstrap</small>"}
+    LOG["🗂️ gate log"]
+
+    PB ==>|"loaded into<br/>every agent"| SP
+    SP ==>|"finished games<br/>≥ 40 messages"| RV
+    RV ==>|"edits"| LT
+    LT ==>|"candidate<br/>playbooks"| GT
+    GT ==>|"✅ AUPRC gain ≥ bar, ECE not worse<br/>new version goes live in every running game"| PB
+    GT -.->|"❌ rejected"| LOG
+
+    classDef play fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    classDef rev fill:#ede9fe,stroke:#7c3aed,color:#0f172a
+    classDef lint fill:#e0f2fe,stroke:#0284c7,color:#0f172a
+    classDef gate fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef pb fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef muted fill:#f1f5f9,stroke:#94a3b8,color:#475569
+    class SP play
+    class RV rev
+    class LT lint
+    class GT gate
+    class PB pb
+    class LOG muted
+```
+
+**One season of play** (two press rounds, then orders)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Sender agent
+    participant V as Vault + leak guard
+    participant R as Receiver agent
+    participant E as Diplomacy engine
+    Note over S,R: One 6-month season (two press rounds, then orders)
+    S->>V: message + private intent (truthful / deceptive) + planned orders
+    V-->>V: store private fields · check receiver prompt for leaks
+    V->>R: message text only
+    R->>V: judgment: p_lie, trust / distrust, reasoning
+    S->>E: orders
+    R->>E: orders
+    E-->>V: resolved board · promises kept or broken
+    Note over V: Privileged record → Opus review + decision-trace graph
 ```
 
 ### 3.1 Components
@@ -296,6 +347,39 @@ Leaderboard from the run where rsi-v1 was accepted:
 ---
 
 ## 9. Deployment
+
+```mermaid
+flowchart LR
+    U["👥 Anyone<br/>browser"] -->|HTTPS| CA["Caddy<br/><small>auto TLS</small>"]
+    A["🔑 Admin"] -->|"IAP tunnel"| VM
+    subgraph VM["GCP VM · rsi-backend"]
+        direction TB
+        CA -->|"/ui/rsi · /ui/game<br/>public, read-only"| VW["Dashboard server<br/>:8765"]
+        CA -->|"/ui/play<br/>password"| PL["Play server<br/>:8770"]
+        subgraph C["Docker container"]
+            VW
+            PL
+            LP["Continuous RSI loop"]
+            GW["Rust gateways<br/><small>cache · spend caps · retries</small>"]
+        end
+        LP --> GW
+        PL --> GW
+        DK[("Persistent disk<br/>runs · playbooks · history")]
+        C --- DK
+    end
+    SM["Secret Manager<br/>OpenRouter key"] -.-> GW
+    GW -->|"model calls"| OR["OpenRouter<br/><small>players · judge · Opus</small>"]
+    classDef ext fill:#f1f5f9,stroke:#475569,color:#0f172a
+    classDef svc fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    classDef core fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef sec fill:#fef3c7,stroke:#d97706,color:#0f172a
+    class U,A,OR ext
+    class CA,VW,PL svc
+    class LP,GW core
+    class SM,DK sec
+    style VM fill:#f8fafc,stroke:#94a3b8,color:#0f172a
+    style C fill:#eff6ff,stroke:#93c5fd,color:#1e3a8a
+```
 
 - **GCP project `rsitry`, VM `rsi-backend`.** It ran on e2-standard-4 during the runs and is now e2-small (about $19/month) in **dashboard-only** mode.
 - **One container:**
