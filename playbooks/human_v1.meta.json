@@ -1,0 +1,1002 @@
+{
+  "source": "Peskov et al. 2020 train+validation (games 1-3, 5-11); test (4, 12) held out",
+  "learner": "anthropic/claude-opus-5.5",
+  "batches": 14,
+  "per_batch": 40,
+  "seed": 0,
+  "lessons": [
+    {
+      "text": "When a message is mostly an emotional or loyalty assertion (I trust you, I've been honest, best ally ever, full juggernaut) with no new checkable move or concession, raise p_lie modestly. Discount affection and honesty claims entirely as evidence of trust.",
+      "kind": "catch_lies",
+      "rationale": "Several lies were pure trust or loyalty declarations, repeated reassurance, or an indignant claim of honesty. Receivers trusted all of them, because the warm tone substituted for verifiable content.",
+      "evidence_ids": [
+        "b0e4",
+        "b0e5",
+        "b0e26",
+        "b0e30"
+      ]
+    },
+    {
+      "text": "When the sender reports what third parties said or did (they've been quiet, X said Y, X is planning to attack you), treat it as unverified and raise p_lie. This applies especially to early-game claims that steer your alliances or excuse the sender's own move.",
+      "kind": "catch_lies",
+      "rationale": "Lies often took the form of claims about other players' silence, chatter or intentions, or a post-hoc excuse built on a third party. Receivers could not check these and trusted them.",
+      "evidence_ids": [
+        "b0e10",
+        "b0e20",
+        "b0e28",
+        "b0e38",
+        "b0e19"
+      ]
+    },
+    {
+      "text": "When an offer is unusually generous (giving you both contested centres, a full commitment against a third power) and comes early or before you have reciprocated, raise p_lie. Ask for a verifiable first step, such as DMZ compliance or support visible on the board.",
+      "kind": "catch_lies",
+      "rationale": "The lies included lopsided early offers that would lure the receiver into a war or concession. Receivers took the bait.",
+      "evidence_ids": [
+        "b0e9",
+        "b0e36",
+        "b0e4"
+      ]
+    },
+    {
+      "text": "Do not treat a one-word confirmation (done, good to know) as safe just because it is short. If it confirms an order you cannot observe until resolution, keep p_lie near the base rate plus a bit, and hedge your own orders.",
+      "kind": "catch_lies",
+      "rationale": "Short acknowledgements of agreed moves were sometimes lies. They carry no detail to check, so receivers trusted them by default.",
+      "evidence_ids": [
+        "b0e35",
+        "b0e12"
+      ]
+    },
+    {
+      "text": "Lower p_lie when the sender explains reasoning that matches the board, admits self-interest, or describes contingent and hedged plans (depending on, if, I'll think on it). Frank disagreement or blunt complaints are usually truthful, not signs of deception.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers often suspected truthful messages that were hedged, conditional or argumentative, such as tactical disputes, conditional help offers, or admissions of being courted by others. These were honest.",
+      "evidence_ids": [
+        "b0e1",
+        "b0e2",
+        "b0e6",
+        "b0e7",
+        "b0e8",
+        "b0e13",
+        "b0e33",
+        "b0e37",
+        "b0e3"
+      ]
+    },
+    {
+      "text": "Calibrate against a low base rate. Most messages, including detailed plans, map analysis and abrupt plan changes, are truthful, so start near 5-10% p_lie. Move above about 30% only when two or more lie signals stack: an unverifiable claim, flattery, a big ask, and benefit to the sender if you comply.",
+      "kind": "calibration",
+      "rationale": "Humans flagged many truths and missed most lies. Their suspicion was aimed at the wrong features, such as conditional language or surprising announcements, rather than at stacked manipulation cues.",
+      "evidence_ids": [
+        "b0e0",
+        "b0e17",
+        "b0e27",
+        "b0e31",
+        "b0e33",
+        "b0e11",
+        "b0e25"
+      ]
+    },
+    {
+      "text": "When a sender relays what a third party said or agreed (they confirmed X, they refused Y, I sent them a message), treat the report as unverified. Raise p_lie, especially when the report is what makes you commit to a plan or drop a hedge.",
+      "kind": "catch_lies",
+      "rationale": "Several lies were reports about third-party communications. They claimed a confirmation, a refusal, a message just sent, or how much the sender talks to someone. Receivers trusted all of them because such reports are hard to check.",
+      "evidence_ids": [
+        "b1e0",
+        "b1e9",
+        "b1e33",
+        "b1e6",
+        "b1e1"
+      ]
+    },
+    {
+      "text": "When a sender well ahead on centres (about 10+) promises to hand you centres or leave a home centre open, or insists they are not going for a solo, raise p_lie sharply. Fervent assurances of commitment or offence at your accusation are a warning, not reassurance.",
+      "kind": "catch_lies",
+      "rationale": "Leaders at 10 to 13 centres repeatedly lied while promising gifts, disclaiming solo ambitions, or performing hurt indignation. Receivers trusted every one.",
+      "evidence_ids": [
+        "b1e19",
+        "b1e27",
+        "b1e32",
+        "b1e34",
+        "b1e12",
+        "b1e36"
+      ]
+    },
+    {
+      "text": "In opening and early phases, treat a quick one-line agreement to your proposal (yes, sounds good, makes sense) as a weak signal, not a commitment. Note that a short assent cost the sender nothing. Raise p_lie slightly when no concrete moves follow.",
+      "kind": "catch_lies",
+      "rationale": "Bare early assents to alliance or demilitarised-zone proposals were frequently lies. Receivers trusted them because they sounded agreeable.",
+      "evidence_ids": [
+        "b1e17",
+        "b1e29",
+        "b1e5",
+        "b1e16"
+      ]
+    },
+    {
+      "text": "When a sender gives an innocent explanation for an order that contradicts a promise (a mis-entered order, a changed build), raise p_lie. Be especially wary when they follow it with an emphatic capitalised no-hostile-intent pledge.",
+      "kind": "catch_lies",
+      "rationale": "A build-location excuse with an emphatic pledge was a lie. A similar post-hoc excuse paired with a concrete corrective move that is checkable next turn was true. So weigh whether the claim is verifiable.",
+      "evidence_ids": [
+        "b1e37",
+        "b1e39"
+      ]
+    },
+    {
+      "text": "Do not flag short reactive replies, small talk, frustration, questions back to you, or tactical counter-suggestions as lies. These carry little commitment and were almost always truthful, even when receivers suspected them.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers suspected brief replies, annoyance, questions, and alternative convoy suggestions. All of these were true. Messages with no promise or factual claim rarely carry deception.",
+      "evidence_ids": [
+        "b1e4",
+        "b1e11",
+        "b1e13",
+        "b1e18",
+        "b1e25",
+        "b1e14",
+        "b1e3",
+        "b1e21"
+      ]
+    },
+    {
+      "text": "Keep base p_lie low (about 5-10%). Concentrate suspicion on messages that make checkable claims about third parties, promise future gifts, or ask you to commit or expose units. A sender openly negotiating conditions and offering a staged trust-building withdrawal is more likely truthful.",
+      "kind": "calibration",
+      "rationale": "Human receivers' suspicion fell mostly on truthful messages while they trusted the lies. Conditional, incremental offers of a ceasefire or withdrawal and frank partnership talk were true.",
+      "evidence_ids": [
+        "b1e8",
+        "b1e22",
+        "b1e10",
+        "b1e38",
+        "b1e20"
+      ]
+    },
+    {
+      "text": "When a much larger power (roughly 1.5x your centres or more) sends a detailed move script or a grand two-power endgame vision, especially one where it does the planning, raise p_lie. Check every proposed order against what it frees up for the sender.",
+      "kind": "catch_lies",
+      "rationale": "Leading powers drafting full order sets or blitzkrieg plans for smaller allies were often lying. Receivers trusted these messages because the specificity looked like commitment.",
+      "evidence_ids": [
+        "b2e20",
+        "b2e26",
+        "b2e30",
+        "b2e36"
+      ]
+    },
+    {
+      "text": "When a sender answers an accusation with a long list of past favours, claims never to have lied, or shows offended sincerity instead of addressing the specific concern, raise p_lie. Judge them by their recent unit moves near you, not by their r\u00e9sum\u00e9.",
+      "kind": "catch_lies",
+      "rationale": "Indignant self-justification and claims of having never lied came from senders who were in fact deceiving. Receivers mostly trusted them.",
+      "evidence_ids": [
+        "b2e32",
+        "b2e26",
+        "b2e27",
+        "b2e2"
+      ]
+    },
+    {
+      "text": "When a sender moves a unit adjacent to your centre and pre-emptively says it is not aimed at you, only at a third party, raise p_lie. Demand a verifiable action, such as a support order or a move away next turn.",
+      "kind": "catch_lies",
+      "rationale": "Unprompted reassurances about a border unit's purpose were lies. The receiver trusted them.",
+      "evidence_ids": [
+        "b2e15",
+        "b2e6"
+      ]
+    },
+    {
+      "text": "When a sender offers a reciprocal deal where you act first and they reciprocate later, or claims to barely talk to a third party, treat it as moderately suspect. Ask them to act first or to act simultaneously.",
+      "kind": "catch_lies",
+      "rationale": "Several lies were offers in which the sender gained first and the receiver's payoff was deferred. Others were convenient denials of contact with a rival.",
+      "evidence_ids": [
+        "b2e10",
+        "b2e11",
+        "b2e12",
+        "b2e22"
+      ]
+    },
+    {
+      "text": "Do not flag short logistics, greetings, apologies for failed moves, or 'ok/works for me' acknowledgements as lies. These carry almost no deceptive payload, so keep p_lie near base rate even if the tone feels evasive or the timing is odd.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers often suspected trivial messages (pings, sorry, ok then, hello, sorry you didn't get in), and all of these were truthful.",
+      "evidence_ids": [
+        "b2e0",
+        "b2e8",
+        "b2e14",
+        "b2e29",
+        "b2e39",
+        "b2e38"
+      ]
+    },
+    {
+      "text": "Calibrate: opening-season pleasantries and gossip about other powers are mostly true, so keep p_lie low unless the claim directly steers your units. Reserve high p_lie for messages that pair a strategic ask with reassurance.",
+      "kind": "calibration",
+      "rationale": "Early chatter and frank strategy talk were typically truthful, yet humans flagged many of them. Lies clustered where the sender needed the receiver to commit units.",
+      "evidence_ids": [
+        "b2e5",
+        "b2e23",
+        "b2e33",
+        "b2e3",
+        "b2e17",
+        "b2e1"
+      ]
+    },
+    {
+      "text": "When a sender answers a direct accusation with a meta-claim of honesty (if I were lying I'd act differently, I've always been honest with you), raise p_lie. Explicit sincerity appeals after a trust breach are cheap talk and often cover deceit.",
+      "kind": "catch_lies",
+      "rationale": "A leading power defending itself against legitimate suspicion with an honesty appeal was lying. Elsewhere, truthful senders in tense exchanges argued from board geometry instead of vouching for their own sincerity.",
+      "evidence_ids": [
+        "b3e4",
+        "b3e33"
+      ]
+    },
+    {
+      "text": "When a sender volunteers intelligence-gathering or support on your behalf (I'll find out discreetly, I'll lend support, I have a plan that needs you to move or retreat), raise p_lie. This is especially true if the plan weakens your position or depends on unverifiable third-party contact.",
+      "kind": "catch_lies",
+      "rationale": "Offers to spy for the receiver, lend conditional support, or engineer a dislodgement and rebuild were lies. So was a claimed third-party agreement, while receivers trusted them all.",
+      "evidence_ids": [
+        "b3e15",
+        "b3e2",
+        "b3e34",
+        "b3e32",
+        "b3e9"
+      ]
+    },
+    {
+      "text": "In early game, treat eager alliance assent, anti-third-party bonding (let's never fight, he lies about you) and vague justifications for border moves as moderately risky. Raise p_lie when warmth is high and the stated commitment is noncommittal.",
+      "kind": "catch_lies",
+      "rationale": "Several early-year lies were warm agreements or soft explanations of threatening moves. Examples include agreeing to attack a neighbour, a plea never to fight, and a unit placed on a border that was not aimed at anyone. Humans trusted most of these.",
+      "evidence_ids": [
+        "b3e29",
+        "b3e13",
+        "b3e38",
+        "b3e39",
+        "b3e21"
+      ]
+    },
+    {
+      "text": "Do not flag a message as a lie just because the conversation is hostile, the sender lied before, or the sender expresses fear or uncertainty. Angry, defensive or nervous messages that argue from board geography are usually truthful.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers suspected many messages that turned out true: self-defence in a heated exchange, conditional threats, nervous hedging, admissions of a past mutual lie, and questions about the end of an alliance.",
+      "evidence_ids": [
+        "b3e0",
+        "b3e3",
+        "b3e6",
+        "b3e36",
+        "b3e31",
+        "b3e20"
+      ]
+    },
+    {
+      "text": "Keep p_lie low for short simple confirmations, questions, greetings and plain statements that will be checked by next turn's adjudication. Examples are I'm supporting you in, or I have not heard from that player. Exception: a bare okay to a detailed plan that you can't verify.",
+      "kind": "calibration",
+      "rationale": "Brief replies, questions and verifiable support pledges were overwhelmingly true, yet several were suspected. The one lying bare okay came from a sender agreeing to a plan with no stake of its own.",
+      "evidence_ids": [
+        "b3e35",
+        "b3e37",
+        "b3e5",
+        "b3e11",
+        "b3e19",
+        "b3e16"
+      ]
+    },
+    {
+      "text": "When a dominant sender (10+ centers) carefully restates a detailed joint order set or flatters you as the likely winner, do not let the precision reassure you. Check each order for self-benefit and for gaps, because exact-looking confirmations can hide a stab.",
+      "kind": "calibration",
+      "rationale": "A large power's precise order recap was a lie, and so was a leader's flattery suggesting the receiver could solo. Both were trusted because they looked cooperative and specific.",
+      "evidence_ids": [
+        "b3e28",
+        "b3e14",
+        "b3e18"
+      ]
+    },
+    {
+      "text": "When a Spring 1901 reply to a probing question is a vague deferral (not sure yet, haven't heard much, will let you know, can't tell), raise p_lie modestly. Early neutral players often hide existing talks or intentions behind noncommittal filler. Seek specifics before relying on it.",
+      "kind": "catch_lies",
+      "rationale": "Several opening-season deferrals and claims of having no information were labelled lies, and all were trusted. These senders likely already had plans or contacts they withheld.",
+      "evidence_ids": [
+        "b4e1",
+        "b4e5",
+        "b4e38",
+        "b4e29",
+        "b4e9"
+      ]
+    },
+    {
+      "text": "When a sender explains away a unit build or move that threatens you (built as a precaution, covered a hole, forgot an enemy would support) and pairs it with soothing words, raise p_lie. After-the-fact excuses for hostile-looking positioning frequently mask stab preparation.",
+      "kind": "catch_lies",
+      "rationale": "Several lies were excuses: a threatening fleet build with a don't-freak-out framing, a defensive repositioning blamed on silence, and an apology for misjudging another power's support. The receivers trusted all of them.",
+      "evidence_ids": [
+        "b4e28",
+        "b4e14",
+        "b4e0"
+      ]
+    },
+    {
+      "text": "When a sender asks you to open a key space or let their unit in, claiming they are stabbing a third party, or offers lopsided long-range plans that reward you, raise p_lie. Check whether the request moves their unit adjacent to your centres.",
+      "kind": "catch_lies",
+      "rationale": "Requests such as letting a unit into the Black Sea on trust, a dislodge-and-rebuild scheme, generous partition visions, and offering a centre to a third party to delay supporting you were lies.",
+      "evidence_ids": [
+        "b4e6",
+        "b4e37",
+        "b4e36",
+        "b4e3",
+        "b4e4"
+      ]
+    },
+    {
+      "text": "When a leading power (about 10+ SCs) writes long, emotional protestations of loyalty or detailed plans for a weaker ally, do not let the effort convince you. Large leaders benefit most from keeping allies passive. Raise p_lie and verify against their actual orders.",
+      "kind": "calibration",
+      "rationale": "High-SC senders' heartfelt denials of sabotage and elaborate help plans were lies that were trusted. Length and sincerity cues did not track truth.",
+      "evidence_ids": [
+        "b4e33",
+        "b4e37",
+        "b4e3",
+        "b4e28"
+      ]
+    },
+    {
+      "text": "Do not flag short, low-stakes replies (possibly, probably X and Y, that could work) or banter as lies merely because they are terse or flattering. Hedged answers about one's own next move are usually honest. Keep p_lie near the base rate.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers suspected terse or hedged answers and compliments that turned out to be true. Hedging is honest uncertainty, not deception.",
+      "evidence_ids": [
+        "b4e17",
+        "b4e25",
+        "b4e32",
+        "b4e23",
+        "b4e26",
+        "b4e20"
+      ]
+    },
+    {
+      "text": "When a sender gives a concrete, verifiable order confirmation, discloses an awkward truth, or argues openly for their own interest in a split, lower p_lie. Self-interested bargaining and checkable specifics are usually honest.",
+      "kind": "avoid_false_alarms",
+      "rationale": "These messages were all true, yet several were suspected:\n- explicit support confirmations and refusals of support with a stated reason\n- admissions of deals made with others\n- frank pushback in negotiations over a centre",
+      "evidence_ids": [
+        "b4e39",
+        "b4e34",
+        "b4e19",
+        "b4e22",
+        "b4e11",
+        "b4e13"
+      ]
+    },
+    {
+      "text": "When a sender hands you exact move orders that include them supporting your unit into a contested centre, or makes a firm 'I will support X' pledge tied to you weakening a front, raise p_lie. Check whether their own units could profit if your unit moves or your support is cut.",
+      "kind": "catch_lies",
+      "rationale": "Detailed order sets and support pledges that ask the receiver to commit units were often false, and receivers trusted them. Specificity was used to manufacture credibility.",
+      "evidence_ids": [
+        "b5e2",
+        "b5e9",
+        "b5e21",
+        "b5e33"
+      ]
+    },
+    {
+      "text": "When a sender denies contact with a third party, or claims a vague or no-plan stance ('still deciding', 'boring move', 'no dialogue with them'), raise p_lie somewhat. Concealing plans and back-channels is a cheap, common lie that receivers rarely catch.",
+      "kind": "catch_lies",
+      "rationale": "Several lies were denials of talks or noncommittal plan statements, and receivers trusted most of them.",
+      "evidence_ids": [
+        "b5e30",
+        "b5e25",
+        "b5e11",
+        "b5e15",
+        "b5e17",
+        "b5e13"
+      ]
+    },
+    {
+      "text": "When a sender asks you to relay requests to, or bounce with, a third power in a way that mainly gathers intelligence or pins that power for them, treat their stated alliance framing skeptically. Raise p_lie on the reassurance that comes with the request.",
+      "kind": "catch_lies",
+      "rationale": "Requests framed as cooperative information-gathering, or as protecting a mutual friend, masked hidden agendas.",
+      "evidence_ids": [
+        "b5e11",
+        "b5e3",
+        "b5e8"
+      ]
+    },
+    {
+      "text": "Do not flag explanations of a past mistake (forgotten submission, accidental move, misclick) as lies by default. These post-hoc excuses about already-resolved orders were usually true, and doubting them mostly produced false alarms.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Several excuse-type messages that receivers suspected turned out truthful. Errors are common in human play.",
+      "evidence_ids": [
+        "b5e6",
+        "b5e18",
+        "b5e12"
+      ]
+    },
+    {
+      "text": "Keep p_lie low for short reactive replies, banter, timing hedges ('maybe fall', 'not much I can do') and strategic opinions about third parties. They carry little exploitable commitment, and suspecting them is usually a false alarm.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Brief, low-stakes or opinion messages were overwhelmingly truthful, yet receivers often suspected them.",
+      "evidence_ids": [
+        "b5e0",
+        "b5e5",
+        "b5e28",
+        "b5e32",
+        "b5e10",
+        "b5e31",
+        "b5e34"
+      ]
+    },
+    {
+      "text": "Calibrate around a low base rate. Raise p_lie only when a message makes a verifiable commitment or denial that benefits the sender if you believe it. Emotional appeals, accusations of betrayal and extreme threats are often posturing, so judge them by position rather than tone.",
+      "kind": "calibration",
+      "rationale": "Several lies carried angry or extreme framing. Many truthful messages were pleas or explanations that humans wrongly doubted, while they missed lies in calm commitments.",
+      "evidence_ids": [
+        "b5e14",
+        "b5e39",
+        "b5e20",
+        "b5e24",
+        "b5e29"
+      ]
+    },
+    {
+      "text": "When a much larger power (8+ SCs) sends a long self-justifying account of its past loyalty and sacrifices in response to an accusation, raise p_lie, since emphatic past-tense honesty claims are cheap and unverifiable. Check the claims against actual moves before trusting.",
+      "kind": "catch_lies",
+      "rationale": "Leading powers answering accusations with elaborate loyalty narratives were lying, yet receivers trusted them.",
+      "evidence_ids": [
+        "b6e19",
+        "b6e33",
+        "b6e23"
+      ]
+    },
+    {
+      "text": "When a message gives you tactical advice about where to move your own units, or promises to manage third parties for you, raise p_lie if following it leaves a home center or key space open to the sender or its partners.",
+      "kind": "catch_lies",
+      "rationale": "Unsolicited move suggestions and offers to steer third parties came from senders setting up stabs, and receivers trusted them.",
+      "evidence_ids": [
+        "b6e13",
+        "b6e10",
+        "b6e35"
+      ]
+    },
+    {
+      "text": "When the sender denies knowledge (has no idea what X is doing, never heard of something, still figuring things out) or claims to be ignored by everyone, raise p_lie modestly. Feigned ignorance and isolation are common low-cost cover.",
+      "kind": "catch_lies",
+      "rationale": "Several professions of ignorance or isolation were lies that hid side deals.",
+      "evidence_ids": [
+        "b6e22",
+        "b6e26",
+        "b6e1",
+        "b6e11"
+      ]
+    },
+    {
+      "text": "Treat a sudden concession after you resist, such as the sender abruptly giving up a center it wanted, as suspicious. Raise p_lie when a short message reverses a firm demand with no stated reason.",
+      "kind": "catch_lies",
+      "rationale": "A one-line reversal handing over a contested center was a lie.",
+      "evidence_ids": [
+        "b6e38",
+        "b6e17"
+      ]
+    },
+    {
+      "text": "Do not treat hostility, bluntness, arguments or open admissions of attacking you as signs of lying. Senders who refuse a plan, confess they are double-dealing, or argue heatedly are usually telling the truth, so keep p_lie near the base rate.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers often suspected candid refusals, heated rebuttals and admissions of war, but all of these were truthful.",
+      "evidence_ids": [
+        "b6e0",
+        "b6e4",
+        "b6e14",
+        "b6e37",
+        "b6e21"
+      ]
+    },
+    {
+      "text": "Early-game (1901) friendly overtures, alliance proposals with concrete opening orders, and long-term draw plans are mostly truthful. Default p_lie to about 5-10% unless they contradict the board or a known commitment. Short acknowledgements and agreements are near the base rate.",
+      "kind": "calibration",
+      "rationale": "Many opening-season and plan messages flagged by receivers were true, while simple confirmations were also true.",
+      "evidence_ids": [
+        "b6e15",
+        "b6e16",
+        "b6e20",
+        "b6e31",
+        "b6e36",
+        "b6e32",
+        "b6e34"
+      ]
+    },
+    {
+      "text": "When a much larger power (roughly 8+ centres, leading the board) reports third-party intentions, denies knowing others' plans, or frames a shared enemy to a smaller partner, raise p_lie. Leaders shape smaller allies' views to steer them while keeping their own options open.",
+      "kind": "catch_lies",
+      "rationale": "Several lies came from leaders with 8-10 centres talking to partners with 5-7. They denied knowing a third party's plans, claimed they could not reach a centre, offered reassurance about the partner's position, or pushed a team-up against a common foe. The receivers trusted all of them.",
+      "evidence_ids": [
+        "b7e1",
+        "b7e2",
+        "b7e8",
+        "b7e30",
+        "b7e34",
+        "b7e28"
+      ]
+    },
+    {
+      "text": "When a message gives an unusually detailed account of what third parties plan or have privately said (exact unit routes, which centre gets 'full force'), and it conveniently pushes you to act, raise p_lie moderately. Detail you cannot verify is not evidence of honesty.",
+      "kind": "catch_lies",
+      "rationale": "Long, specific intel dumps about other powers' orders turned out to be fabricated or slanted. They were designed to make the receiver defend or attack in a way that served the sender.",
+      "evidence_ids": [
+        "b7e4",
+        "b7e9",
+        "b7e22"
+      ]
+    },
+    {
+      "text": "Treat short confirmations, quick tactical corrections and logistics replies to concrete requests (yes, will do, I can support from X instead) as truthful by default. Lower p_lie, and do not let terseness alone trigger suspicion.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers often suspected curt agreements, yet nearly all of these were true. Terse coordination messages are overwhelmingly honest. One agreeable 'if you think I should' reply was a lie, but it sat next to an honest 'yes' that had been wrongly suspected.",
+      "evidence_ids": [
+        "b7e5",
+        "b7e6",
+        "b7e10",
+        "b7e16",
+        "b7e36",
+        "b7e21",
+        "b7e18"
+      ]
+    },
+    {
+      "text": "When a sender who has already admitted lying to you now promises support plus an appeal to rebuild trust, or reassures you with a 'full disclosure' hedge about covering a centre, keep p_lie elevated. Rehabilitation pitches and pre-emptive hedges often mask continued deception.",
+      "kind": "catch_lies",
+      "rationale": "A support promise made after a confessed betrayal was a lie. So was a friendly 'full disclosure' note that disguised a hostile move. Both receivers trusted them.",
+      "evidence_ids": [
+        "b7e27",
+        "b7e37",
+        "b7e14"
+      ]
+    },
+    {
+      "text": "Messages where the sender admits weakness, voices doubt about their own prospects, or reasons through tactics in the open (including rejecting your plan for a different one) are usually honest. Lower p_lie unless the map contradicts them.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Candid pessimism, candid strategic musing and open tactical counter-proposals were truthful. Receivers sometimes suspected these anyway, which produced false alarms.",
+      "evidence_ids": [
+        "b7e3",
+        "b7e19",
+        "b7e20",
+        "b7e26",
+        "b7e29",
+        "b7e31",
+        "b7e12",
+        "b7e32"
+      ]
+    },
+    {
+      "text": "Calibrate around a low base rate, with the most mass on 0.03-0.10. Push p_lie toward 0.3 or higher only when several signals stack: a size advantage, an unverifiable third-party claim, a request that benefits the sender, or a prior breach. Early openers proposing a partnership deserve only a mild bump.",
+      "kind": "calibration",
+      "rationale": "Across this batch most messages were true, and humans flagged many truths as lies. The lies clustered where structural signals combined. Generic opening alliance pitches were sometimes lies but hard to distinguish, so they warrant only a small bump.",
+      "evidence_ids": [
+        "b7e0",
+        "b7e13",
+        "b7e17",
+        "b7e7",
+        "b7e11",
+        "b7e39"
+      ]
+    },
+    {
+      "text": "When a much larger power that has just stabbed you sends apologetic, self-blaming messages, or claims hidden motives for sparing you, raise p_lie. Contrition after a stab is usually there to slow your counterattack. Judge it by whether their units actually withdraw.",
+      "kind": "catch_lies",
+      "rationale": "Post-stab apologies and confidential out-of-game justifications from dominant senders were lies, and receivers trusted them.",
+      "evidence_ids": [
+        "b8e1",
+        "b8e5",
+        "b8e38"
+      ]
+    },
+    {
+      "text": "When a leading power hands you detailed order sets, or asks for a specific support or convoy that ties up your units, raise p_lie. Check whether the plan leaves the sender's own goals safe while exposing your centres.",
+      "kind": "catch_lies",
+      "rationale": "Leaders with 10+ centres scripted precise moves for weaker allies and offered deferred supports. Receivers trusted these plans, but they were lies.",
+      "evidence_ids": [
+        "b8e7",
+        "b8e19",
+        "b8e22",
+        "b8e26",
+        "b8e23"
+      ]
+    },
+    {
+      "text": "Treat a promise of future help that depends on conditions (support later, a trade-back later, help if I'm cleared) as cheap talk. Raise p_lie modestly, especially in early-game opening deals.",
+      "kind": "catch_lies",
+      "rationale": "Conditional or deferred offers of support and centre swaps were frequently lies, and receivers accepted them.",
+      "evidence_ids": [
+        "b8e4",
+        "b8e25",
+        "b8e7",
+        "b8e6",
+        "b8e28"
+      ]
+    },
+    {
+      "text": "When a sender is vague or feigns ignorance about their own unit's plans after a direct question, raise p_lie slightly, especially if that unit borders you. Noncommittal answers about a key unit often hide an order already made.",
+      "kind": "catch_lies",
+      "rationale": "Claims of having no instructions, of still learning the board, or of having expected a move to fail turned out to be lies, and receivers trusted them.",
+      "evidence_ids": [
+        "b8e0",
+        "b8e36",
+        "b8e37"
+      ]
+    },
+    {
+      "text": "Do not flag a message just because the sender explains a past aggressive move or asks for restraint. Lower p_lie when the explanation fits the visible board and the stated aim (such as turning toward another front) is in the sender's own interest.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers suspected several truthful messages that justified a move or proposed a de-escalation consistent with the sender's position.",
+      "evidence_ids": [
+        "b8e3",
+        "b8e8",
+        "b8e10",
+        "b8e11",
+        "b8e15",
+        "b8e21",
+        "b8e31"
+      ]
+    },
+    {
+      "text": "Calibrate low (about 5%) for short acknowledgements, thanks, board observations, and questions; they carry no exploitable commitment. Reserve high p_lie for messages that steer your orders or ask you to forgive an attack.",
+      "kind": "calibration",
+      "rationale": "Brief confirmations, news-sharing and casual remarks were overwhelmingly truthful. The lies clustered in messages that asked for actions or trust.",
+      "evidence_ids": [
+        "b8e9",
+        "b8e13",
+        "b8e14",
+        "b8e18",
+        "b8e20",
+        "b8e27",
+        "b8e12",
+        "b8e24"
+      ]
+    },
+    {
+      "text": "When a dominant or rising power (10+ SCs) disclaims solo ambitions, rhetorically asks why it would go solo, or casually agrees to a draw or elimination plan, raise p_lie sharply. Its incentives favor keeping you complacent, and short assent costs it nothing.",
+      "kind": "catch_lies",
+      "rationale": "Several lies came from large powers denying solo intent or giving cheap agreement to draw plans. Receivers trusted them, and the reassurance was not backed by any board move.",
+      "evidence_ids": [
+        "b9e7",
+        "b9e23",
+        "b9e33",
+        "b9e10",
+        "b9e12"
+      ]
+    },
+    {
+      "text": "When a message after a stab offers an apology, blames a third party or confides an out-of-game excuse, treat it as likely manipulation aimed at your next moves. Judge the sender by moves, not by contrition.",
+      "kind": "catch_lies",
+      "rationale": "Stab apologies and confidential hardship stories were labelled lies yet trusted. Their purpose is to repair leverage cheaply.",
+      "evidence_ids": [
+        "b9e3",
+        "b9e11"
+      ]
+    },
+    {
+      "text": "When an ally gives brief, eager confirmation ('consider it done', 'I'll go for that') of a plan you proposed, especially one that leaves your unit exposed, raise p_lie modestly. Seek a verifiable commitment or hedge the critical square.",
+      "kind": "catch_lies",
+      "rationale": "Short confirmations of the receiver's suggested plans were lies. One sender also pre-built an excuse for failing to deliver support. Cheap assent means little.",
+      "evidence_ids": [
+        "b9e6",
+        "b9e14",
+        "b9e8",
+        "b9e37"
+      ]
+    },
+    {
+      "text": "When a sender tells you a hard-to-verify claim about what a third party said, or invites you into a new coalition against someone, raise p_lie. Unverifiable gossip and recruitment pitches are frequent vehicles for deception.",
+      "kind": "catch_lies",
+      "rationale": "Reported third-party pressure, probing questions about another player's claims, and abrupt team-up offers were lies that receivers mostly trusted.",
+      "evidence_ids": [
+        "b9e21",
+        "b9e5",
+        "b9e2",
+        "b9e20",
+        "b9e25"
+      ]
+    },
+    {
+      "text": "Do not flag terse reactions, rules corrections, board commentary or plain statements of a defensive hold as lies just because they are short or blunt. Keep p_lie near the base rate unless the message asks you to commit units.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers suspected many truthful messages, including filler remarks, a 'possibly', a defensive hold, a stated interest in one center, and an early alliance acceptance. None of these carried exploitable asks.",
+      "evidence_ids": [
+        "b9e0",
+        "b9e4",
+        "b9e22",
+        "b9e24",
+        "b9e19",
+        "b9e27",
+        "b9e34",
+        "b9e29"
+      ]
+    },
+    {
+      "text": "Calibrate p_lie by stakes. Early-game, reciprocal, detailed tactical reasoning that spells out both sides' options is usually truthful. Late-game messages from big powers to smaller partners whose units they could absorb deserve markedly higher p_lie.",
+      "kind": "calibration",
+      "rationale": "Truthful messages were often detailed and balanced tactical analyses from early phases. The lies clustered in years 1905-1909 and around solo or draw dynamics.",
+      "evidence_ids": [
+        "b9e18",
+        "b9e36",
+        "b9e39",
+        "b9e9",
+        "b9e28",
+        "b9e13",
+        "b9e15"
+      ]
+    },
+    {
+      "text": "When a dominant sender (clearly ahead in centers) answers your distrust with long emotional appeals, claims of never having lied, or lists of past favours, raise p_lie sharply. Treat sincerity pleas from the leader as a stab warning, not reassurance.",
+      "kind": "catch_lies",
+      "rationale": "A 10-center sender replied to an ally's open distrust with offended-honesty speeches and a never-lied claim while preparing a betrayal. The receiver trusted each of these messages.",
+      "evidence_ids": [
+        "b10e6",
+        "b10e23",
+        "b10e13",
+        "b10e35"
+      ]
+    },
+    {
+      "text": "When a sender relays what a third party said or plans (intel you cannot verify) and it steers you toward a move that helps the sender, raise p_lie moderately. This applies especially when the sender holds more centers than you or is the one being squeezed.",
+      "kind": "catch_lies",
+      "rationale": "Unverifiable relayed plans, claims of not knowing anything, and vague board reports were lies that receivers swallowed.",
+      "evidence_ids": [
+        "b10e2",
+        "b10e16",
+        "b10e27",
+        "b10e18",
+        "b10e0"
+      ]
+    },
+    {
+      "text": "When a weak or shrinking power offers to hand you its centers, warns you of an outside solo threat, or makes vague future-help promises conditional on your easing pressure, raise p_lie. Desperate players invent incentives.",
+      "kind": "catch_lies",
+      "rationale": "Low-center or collapsing senders made bait offers, sent mass solo alarms, and gave 'later I'll support you' promises, and all were false.",
+      "evidence_ids": [
+        "b10e0",
+        "b10e14",
+        "b10e31",
+        "b10e19",
+        "b10e20"
+      ]
+    },
+    {
+      "text": "When you have just been mis-ordered or betrayed, discount excuses such as button errors or forgetfulness, and flattery like 'you and I are the best players'. Raise p_lie for these, but stay calibrated: they are only moderate signals.",
+      "kind": "catch_lies",
+      "rationale": "Order-error excuses and flattery-plus-help offers were lies. One was caught by the receiver and one was trusted.",
+      "evidence_ids": [
+        "b10e36",
+        "b10e30",
+        "b10e9"
+      ]
+    },
+    {
+      "text": "Do not flag short tactical messages that match moves already agreed, give concrete supports you can verify next turn, or state the sender's own interest candidly. Keep p_lie near the base rate, about 5%.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers wrongly suspected concrete, verifiable tactical coordination and blunt self-interested statements, all of which were true.",
+      "evidence_ids": [
+        "b10e25",
+        "b10e15",
+        "b10e1",
+        "b10e22",
+        "b10e4",
+        "b10e38"
+      ]
+    },
+    {
+      "text": "Treat early-game alliance pitches with long-term carve-ups, and heated denials in already-broken relationships, as mostly truthful by default. Reserve suspicion for messages that pair a commitment with a request that you expose yourself.",
+      "kind": "calibration",
+      "rationale": "Several of these message types were suspected by receivers but were true, including grand three-way plans, a flat denial of lying after a fallout, and endgame draw coordination.",
+      "evidence_ids": [
+        "b10e7",
+        "b10e12",
+        "b10e37",
+        "b10e8",
+        "b10e39"
+      ]
+    },
+    {
+      "text": "When a dominant player (roughly 10+ centres) sends long, emotionally polished appeals about loyalty, past sacrifices or a wish to draw, raise p_lie sharply. The lead player has the most to gain from lulling allies, so test every claim against board moves rather than tone.",
+      "kind": "catch_lies",
+      "rationale": "Several lies came from 10-13 centre leaders: aggrieved loyalty speeches, draw-and-hug pitches, open-door appeals, and claims to prefer the receiver over a rival. All were trusted, so warm or hurt tone predicted nothing about honesty.",
+      "evidence_ids": [
+        "b11e19",
+        "b11e23",
+        "b11e28",
+        "b11e33",
+        "b11e11",
+        "b11e29"
+      ]
+    },
+    {
+      "text": "When a sender pre-explains an aggressive-looking move as harmless (\"not aimed at you, only to pressure a third party\"), or promises future support that costs them nothing now, raise p_lie. Deferred favours and reassurance about a unit next to you are cheap cover for a stab.",
+      "kind": "catch_lies",
+      "rationale": "In these examples, reassurance about a move into a bordering province and promises to support the receiver later or guarantee a centre next year were lies, and the receivers trusted them.",
+      "evidence_ids": [
+        "b11e1",
+        "b11e10",
+        "b11e29",
+        "b11e9"
+      ]
+    },
+    {
+      "text": "When a sender gives detailed order sets or opening advice that steer your units into a particular position, check whose interests the plan serves. Raise p_lie if it leaves your centres exposed or helps the sender's positioning more than yours.",
+      "kind": "catch_lies",
+      "rationale": "Elaborate tactical plans and opening advice were lies used to steer the receiver: a full order list from a leader, a fleet-routing suggestion, and confirmation of a convoy plan.",
+      "evidence_ids": [
+        "b11e6",
+        "b11e4",
+        "b11e21",
+        "b11e26",
+        "b11e3"
+      ]
+    },
+    {
+      "text": "When a sender denies dealing with a third party, or claims ignorance of that party's plans, treat the denial as unverifiable and only mildly informative. These denials occur both honestly and dishonestly, so judge them by board evidence rather than wording.",
+      "kind": "calibration",
+      "rationale": "Denials split both ways. Some were lies (a quick denial of helping a third party, and professed ignorance of another power's scheme). Others were truths that the receiver suspected (not working with a third party, not having been contacted).",
+      "evidence_ids": [
+        "b11e15",
+        "b11e12",
+        "b11e5",
+        "b11e17"
+      ]
+    },
+    {
+      "text": "Keep p_lie low for short reactive replies, banter, sign-offs, questions back to you, and plain acknowledgements. Lower it further when the sender openly concedes weakness or explains a self-damaging mistake. Suspicion of such messages was usually a false alarm.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers wrongly suspected several truthful messages: curt replies, frank admissions of not acting, an explanation of a forgotten order, and a bargaining request made in a tense standoff.",
+      "evidence_ids": [
+        "b11e13",
+        "b11e25",
+        "b11e27",
+        "b11e18",
+        "b11e34",
+        "b11e39",
+        "b11e22",
+        "b11e37"
+      ]
+    },
+    {
+      "text": "Lower p_lie for early-game information sharing and for self-correcting tactical updates that fix the sender's own orders to protect a shared goal. These cost the sender credibility if false and are mostly truthful.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Truthful examples included early-game intelligence swaps, demilitarisation proposals, and order corrections that improved the receiver's defence.",
+      "evidence_ids": [
+        "b11e0",
+        "b11e24",
+        "b11e36",
+        "b11e38",
+        "b11e16",
+        "b11e31"
+      ]
+    },
+    {
+      "text": "When a dominant sender (well ahead on centres) answers a grievance with long sincerity protests, absolute denials, or claims they could win but choose not to, raise p_lie. Judge them by their board moves, not by how loudly they assert their honesty.",
+      "kind": "catch_lies",
+      "rationale": "The leading power's appeals of hurt feelings, total denials of sabotage and claims of restraint were all lies, yet the receiver trusted them. Emotional over-assertion from the strongest player is cover for continued self-interest.",
+      "evidence_ids": [
+        "b12e12",
+        "b12e23",
+        "b12e25",
+        "b12e26"
+      ]
+    },
+    {
+      "text": "When a sender proposes a 'feint' or misleading move toward you, or asks you to let them do sleight of hand on trust, raise p_lie sharply. Defend the borders they would cross as if the attack were real.",
+      "kind": "catch_lies",
+      "rationale": "A request to accept threatening moves on the promise that they are a ruse to fool a third party was a lie, and the receiver trusted it. Such framing pre-excuses a real stab.",
+      "evidence_ids": [
+        "b12e21"
+      ]
+    },
+    {
+      "text": "When a sender pushes you into a specific aggressive move against a third party, or passes on unverifiable intel about others' hostile plans that steers your units, raise p_lie moderately. Check the claim with the third party before acting.",
+      "kind": "catch_lies",
+      "rationale": "Urging the receiver to attack a neighbour, warning of a coordinated attack based only on a guess, and claiming a third party is going for the solo were all lies. In each case the receiver trusted the claim.",
+      "evidence_ids": [
+        "b12e2",
+        "b12e20",
+        "b12e32",
+        "b12e1"
+      ]
+    },
+    {
+      "text": "When a sender who has already broken a promise or misordered offers a technical excuse plus a fresh promise, stay wary. If the explanation is self-serving and contradicts what you can see on the board, raise p_lie. If the new promise is cheap and easy to verify next turn, lower it.",
+      "kind": "calibration",
+      "rationale": "A changed build blamed on a failed order update, and a confessed betrayal followed by a new promise, were lies. By contrast, a repeated order-glitch apology backed by a concrete support order was true. The difference is verifiability and whether the excuse covers a hostile act.",
+      "evidence_ids": [
+        "b12e19",
+        "b12e18",
+        "b12e28",
+        "b12e37"
+      ]
+    },
+    {
+      "text": "In Spring 1901 treat vague non-commitment or warm mutual non-aggression assurances as weak signals; most are true, but early neutrality pledges from neighbours carry above-base risk. Weight them lightly rather than trusting fully.",
+      "kind": "calibration",
+      "rationale": "Early hedges, a stated plan to consult another power, and a pledge to leave each other alone were all lies. Plain pleasantries were truthful. Opening-phase pledges cost nothing to give.",
+      "evidence_ids": [
+        "b12e9",
+        "b12e27",
+        "b12e33",
+        "b12e22",
+        "b12e0"
+      ]
+    },
+    {
+      "text": "Do not flag a message just because the sender is angry, frustrated, or candid about distrust, or because they ask a plain tactical question or give a specific support order that serves a shared goal. Keep p_lie near base rate for these.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers suspected gracious sign-offs after a fight, admissions of distrust, explicit support orders, openly hedged intel about a third party, and simple questions about unit destinations. All of these were truthful. Honesty about tension is usually genuine.",
+      "evidence_ids": [
+        "b12e3",
+        "b12e4",
+        "b12e24",
+        "b12e30",
+        "b12e31",
+        "b12e34",
+        "b12e5"
+      ]
+    },
+    {
+      "text": "When a sender who just stabbed you or is accused of stabbing offers an excuse (accident, misunderstanding, didn't think they'd take it) plus a fresh promise or arrangement, raise p_lie sharply. Post-betrayal apologies paired with new commitments are frequently deceptive.",
+      "kind": "catch_lies",
+      "rationale": "Several lies were apologies or excuses after a stab, each paired with a renewed pledge or an agreed arrangement. Receivers trusted most of them.",
+      "evidence_ids": [
+        "b13e8",
+        "b13e20",
+        "b13e38",
+        "b13e37"
+      ]
+    },
+    {
+      "text": "When a much larger power (9+ SCs) writes long emotional appeals about past loyalty, sacrifices made for you, or alliance mattering more than dots, while asking you to delay taking centers, raise p_lie. Leaders use sincerity theatre to stall smaller allies.",
+      "kind": "catch_lies",
+      "rationale": "Dominant senders produced lengthy loyalty narratives and requests to wait on center grabs, and these were lies the receivers trusted. A large sender also claimed after the fact that they never wanted a solo.",
+      "evidence_ids": [
+        "b13e2",
+        "b13e17",
+        "b13e13",
+        "b13e24"
+      ]
+    },
+    {
+      "text": "Treat short, easy compliance replies (sure, I could, if you think I should, I can support it) to your request for support as unverified. Raise p_lie modestly, because cheap assent costs the sender nothing, and confirm through order specifics or board position.",
+      "kind": "catch_lies",
+      "rationale": "Minimal-assent replies to support requests were lies in multiple cases, and all of them were trusted.",
+      "evidence_ids": [
+        "b13e6",
+        "b13e18",
+        "b13e21"
+      ]
+    },
+    {
+      "text": "When a sender reports what third parties privately asked them (others want me to attack you, others wonder if I'll open west) or offers a new long-term trio, raise p_lie slightly. Such reports are unverifiable and are often used for positioning, especially while the sender stays neutral.",
+      "kind": "catch_lies",
+      "rationale": "Unverifiable reports about third-party requests, proposals of new alliances, and claims of forced neutrality were lies the receivers trusted.",
+      "evidence_ids": [
+        "b13e28",
+        "b13e36",
+        "b13e16",
+        "b13e10"
+      ]
+    },
+    {
+      "text": "Do not flag terse logistics, sign-offs, geometric corrections (I'm not adjacent), brief explanations of odd moves, or blunt denials during heated arguments as lies by default. Keep p_lie near base rate unless the board contradicts them.",
+      "kind": "avoid_false_alarms",
+      "rationale": "Receivers suspected many truthful messages: an accidental-move claim, an adjacency correction, a need to leave, a denial of lying, and an explanation of an earlier lie. All were true.",
+      "evidence_ids": [
+        "b13e5",
+        "b13e11",
+        "b13e25",
+        "b13e3",
+        "b13e27",
+        "b13e12"
+      ]
+    },
+    {
+      "text": "Calibrate: openings, greetings, opinion questions and detailed honest refusals are almost always true. Concentrate suspicion on messages that request your action or reassure you after damage, and remember humans miss most lies, so trusting by default is not enough there.",
+      "kind": "calibration",
+      "rationale": "Pleasantries and refusals with stated reasons were truthful, and suspicion of them was misplaced. Lies clustered in reassurance and support contexts, which receivers nearly always trusted.",
+      "evidence_ids": [
+        "b13e29",
+        "b13e19",
+        "b13e23",
+        "b13e35",
+        "b13e34",
+        "b13e14"
+      ]
+    }
+  ],
+  "consolidation_notes": "Merged 84 candidate lessons and 6 existing heuristics into 18 heuristics: 11 catch_lies, 5 avoid_false_alarms and 2 calibration. Old H1 and H4 are folded into the order-script heuristic. H2 is merged with post-betrayal excuses. H3 is replaced by the verifiable-specifics heuristic. H5 is now the base-rate heuristic. H6 is folded into the dominant-leader heuristic. Two conflicts were resolved. Cheap assent is flagged only for unverifiable plans that expose you. Excuses are flagged only when they contradict a promise and come with a new ask; other explanations of resolved mistakes stay low.",
+  "rejected_by_lint": [],
+  "hash": "a7a4d7f1fa93"
+}

@@ -137,10 +137,11 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
 
     print("[data] human benchmark (validation = transfer gate; test untouched)")
     splits = human_data.load_all(cfg.paths.data)
-    val_items = _human_val_items(cfg, splits)
-    contamination = build_index(human_data.all_texts(splits["validation"]) + human_data.all_texts(splits["test"]))
+    val_items = _human_val_items(cfg, splits) if lc.human_val_gate else []
+    contamination = build_index((human_data.all_texts(splits["validation"]) if lc.human_val_gate else [])
+                                + human_data.all_texts(splits["test"]))
 
-    v0 = default_genome()
+    v0 = Genome.load(lc.initial_genome) if lc.initial_genome else default_genome()
     v0.save(run_dir / "genomes")
     league = League(v0)
     st = RSIStatus(run_dir)

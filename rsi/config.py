@@ -71,6 +71,11 @@ class LoopConfig(BaseModel):
     sim_gate_truth_ratio: int = 4
     frozen_share: float = 0.5          # share of seats given to frozen league members
     label_mode: Literal["intent", "promise", "either"] = "intent"
+    # Start from a saved genome (e.g. playbooks/human_v1.json) instead of the built-in v0.
+    initial_genome: str | None = None
+    # Human-validation transfer check in the gate. Turn off when the starting playbook was learned
+    # from the validation split (the check would be optimistic).
+    human_val_gate: bool = True
     seed: int = 0
 
 
