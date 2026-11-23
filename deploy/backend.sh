@@ -24,7 +24,7 @@ if [ "${RSI_BG:-1}" = "1" ]; then
   if [ -d "runs/$RUN" ]; then RUN="${RUN}_$(date +%Y%m%d_%H%M)"; fi
   SEED=(); [ -d runs/history ] && SEED=(--seed-history runs/history --seed-max "${SEED_MAX:-8}")
   python -m rsi.continuous --config configs/cadence.yaml --run-name "$RUN" --games "${BG_GAMES:-10}" \
-    --forever --stop-usd "${BG_STOP_USD:-28}" --batch-messages "${BG_BATCH_MESSAGES:-1}" "${SEED[@]}" > "runs/$RUN.log" 2>&1 &
+    --forever --stop-usd "${BG_STOP_USD:-28}" --batch-messages "${BG_BATCH_MESSAGES:-40}" "${SEED[@]}" > "runs/$RUN.log" 2>&1 &
   until [ -d "runs/$RUN" ]; do sleep 1; done
 fi
 mkdir -p "runs/$RUN"
