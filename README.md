@@ -1,122 +1,172 @@
 # Diplomacy RSI Harness
 
-A harness for recursive self-improvement on reasoning-traced trust decisions in Diplomacy:
-- **Players:** several copies of Thinking Machines' Inkling 2 Mini, called through a hosted API, play Diplomacy against each other.
-- **Reviewer:** sees everything, grades the players' trust decisions, and proposes changes to their **playbook**.
-- **Learning:** happens only at the prompt/playbook level. No model weights are trained.
-- **Benchmark:** the human deception dataset (Peskov et al., ACL 2020) is used only for evaluation.
+[![ci](https://github.com/adi274903/diplomacy-rsi-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/adi274903/diplomacy-rsi-harness/actions/workflows/ci.yml)
 
-## Live deployment (GCP)
+A self-improvement harness for **reasoning-traced trust decisions**:
+1. **LLM agents play Diplomacy against each other.** They negotiate in private, label their own messages truthful or deceptive, and judge every message they receive with a lie probability.
+2. **Claude Opus 5.5 is the privileged judge.** It sees everything, reviews finished games with each agent's decision-trace graph, and rewrites the agents' shared **trust-assessment playbook**.
+3. **A statistical gate decides.** A rewrite is kept only if it improves lie detection on **real human games** from the Peskov et al. (ACL 2020) deception dataset, and accepted versions go live in every running game.
 
-- **RSI dashboard:** https://34-59-183-174.sslip.io/ui/rsi/. Playbook versions, Opus's edits, gate verdicts, F1 and AUPRC per version, standings, and the decision-graph explorer.
-- **Live game view:** https://34-59-183-174.sslip.io/ui/game/. Board, messages with intent and judgment reveals, a model per country, and a link to each game's decision-trace graph.
-- **Play against the models:** https://34-59-183-174.sslip.io/ui/play/. Password-protected.
-- **Example game played entirely with rsi-v1:** https://34-59-183-174.sslip.io/ui/game/?f=/games/game_v1demo.html. 21 months, 43 messages, 5 lies, **4 caught**. Its decision-trace graph is at https://34-59-183-174.sslip.io/games/game_v1demo.html.
+No weights are trained; all learning is at the prompt level.
 
-### Screenshots
+**Live demo:** https://34-59-183-174.sslip.io/ui/rsi/ · **Technical report:** [docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md)
 
-**Live game view.** A finished game played entirely with playbook rsi-v1. Each country is played by a different model, and the page shows each sender's private intent, the receiver's lie probability, and the outcome.
 ![Live game view](docs/screenshots/live-game.png)
 
-**Playbook evolution.** Opus's rewrite rsi-v1 was accepted by the gate:
-- ΔAUPRC +0.035 [+0.003, +0.076], p_gain 0.99
-- Δ lie-F1 +0.080
+---
 
-The page also shows the heuristics Opus added and the candidates the gate rejected.
+## Key results
+
+| | Result |
+|---|---|
+| **Playbook learned by Opus from human games** (human-v2), on the held-out test set | AUPRC **0.150 → 0.195** (Δ +0.044, 95% CI [+0.016, +0.087]); ECE **0.275 → 0.143**; AUROC **0.73** vs **0.58** for the human receivers |
+| **Self-play refinement** (rsi-v1, written by Opus after reviewing self-play games), on the human gate games | AUPRC **0.107 → 0.142**; lie-F1 **0.072 → 0.152**; accepted with 99% bootstrap confidence |
+| **Vs the paper** (test lie-F1 at a 0.5 cutoff) | **18.4** for us, vs **20.9** (LSTM+Power+BERT), **27.0** (best model) and **22.5** (humans). **Not beaten** on this metric. |
+| **Is it RSI?** | An automated, gated self-improvement loop with an external critic. **Not** strong RSI: the critic never improves itself, and gains flattened after one accepted step. |
+
+Details, caveats and what did not work are in the [technical report](docs/TECHNICAL_REPORT.md).
+
+## Live demo
+
+| Page | What it shows |
+|---|---|
+| [RSI dashboard](https://34-59-183-174.sslip.io/ui/rsi/) | Playbook versions, Opus's edits with rationale, gate decisions with confidence intervals, F1/AUPRC per version, standings, decision-graph explorer |
+| [Live game view](https://34-59-183-174.sslip.io/ui/game/) | Board, message threads with each sender's private intent and each receiver's lie probability, a model per country, the winner |
+| [Example game played with rsi-v1](https://34-59-183-174.sslip.io/ui/game/?f=/games/game_v1demo.html) | 43 messages, 5 lies, 4 caught ([decision-trace graph](https://34-59-183-174.sslip.io/games/game_v1demo.html)) |
+| [Play against the models](https://34-59-183-174.sslip.io/ui/play/) | You take a country; the models play the rest (password-protected) |
+
+The deployment is in dashboard-only mode. Live games need API budget (see [Deployment](#deployment)).
+
+<details>
+<summary><b>More screenshots</b></summary>
+
+**Playbook evolution:** the heuristics Opus added and the candidates the gate rejected
 ![Playbook update history](docs/screenshots/playbook.png)
 
-**Decision-trace graph.** Each row is a country. The graph links plan → message → judgment → the later reasoning that cites it. Deceptive messages are marked caught or fooled.
+**Decision-trace graph:** plan → message → judgment → the later reasoning that cites it, with caught and fooled lies marked
 ![Decision graph explorer](docs/screenshots/decision-graph.png)
 
-**Standings.** Over 101 games, models rotate between countries, so model strength is separated from starting position:
-- leaderboards by model and by country
-- deception stats
-- lie-F1 per model
+**Standings:** 101 games with models rotated across countries; leaderboards, deception stats and lie-F1 per model
 ![Standings](docs/screenshots/standings.png)
+</details>
 
-Try it yourself: **https://34-59-183-174.sslip.io/ui/rsi/**
+## How it works
 
-These run on a Compute Engine VM in project `rsitry` (see [deploy/gcp/README.md](deploy/gcp/README.md)). The dashboards show the run where Opus's self-play refinement **rsi-v1** was accepted, at 99% gate confidence:
-- gate AUPRC 0.107 → 0.142
-- lie-F1 0.072 → 0.152
+```
+ game slots (parallel, random length, models randomly seated)  ──►  finished games + decision graphs
+      ▲  every agent reads the current playbook                              │
+      │                                                                      ▼
+ accepted playbook goes live in all running games        Claude Opus 5.5 reviews them (privileged view)
+      ▲                                                                      │  proposes playbook edits
+      │                                                                      ▼
+ gate: paired cluster bootstrap on human games 7–8  ◄──  lint (no game specifics, no held-out overlap)
+       (Inkling 2 Small judges; AUPRC gain + ECE check)
+```
 
-See [playbooks/rsi_v1.md](playbooks/rsi_v1.md) and [knowledge/](knowledge/).
+- **Players** are four similar-size open reasoning models, rotated across countries every game: Inkling 2 Mini, Qwen3.6-35B-A3B, Gemma 4 26B-A4B and Nemotron 3 Nano 30B-A3B.
+- **Isolation:** every prompt is checked so a player only sees its own conversations. A game with any leak is discarded.
+- **Ground truth for deception** is the sender's private label **or** a promise that Opus found broken against the orders actually played.
+- **Human data is evaluation-only:**
 
-The VM is currently in dashboard-only mode. Live games need OpenRouter budget (see `deploy/gcp/README.md` to restart the loop).
+  | Games | Use |
+  |---|---|
+  | 1, 2, 3, 5, 6, 11 | Learning the human playbook |
+  | 7–8 | Gate |
+  | 9–10 | Clean report |
+  | 4, 12 | Held-out test (used once) |
 
-See [PLAN.md](PLAN.md) for the design and the contamination controls.
+- **Every model call goes through a Rust gateway:** response cache, spend caps, retries and priority admission.
 
-> **Status:** builds and passes all tests (15 Rust, 16 Python). The full self-play loop runs end to end on the mock backend. It has **not yet been run against a real model API**.
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `rsi/env/` | Diplomacy engine wrapper, private message bus, vault with isolation checks |
+| `rsi/agents/` | Model players, the Opus reviewer, a human seat for live play |
+| `rsi/continuous.py` | Event-driven continuous RSI loop (used in production) |
+| `rsi/loop.py`, `rsi/cadence.py` | Generation-based and fixed-cadence loops; `final-test` (lock-protected) |
+| `rsi/genome.py`, `rsi/evolve.py`, `rsi/gate.py` | Playbooks, edit lint and voting, candidates, the acceptance gate |
+| `rsi/learn_human.py` | Opus learns a playbook from labelled human games |
+| `rsi/causal.py`, `rsi/decision_graph.py` | Decision-trace graphs; optional structured judgments |
+| `rsi/human_data.py`, `rsi/contamination.py` | Benchmark loader; n-gram dedup, memorisation probe, paraphrase test |
+| `rsi/viewer.py`, `rsi/webapi.py`, `rsi/play.py` | Dashboard server and APIs; live-play server |
+| `web/game`, `web/rsi`, `web/play` | Spectator UI, RSI dashboard, play page |
+| `crates/rsi-gateway` | Rust OpenAI-compatible gateway and load generator |
+| `crates/rsi-core` | Rust (PyO3): weighted metrics, paired cluster bootstrap, n-gram index, Aho-Corasick leak guard |
+| `playbooks/` | Every playbook version (human_v1, human_v2, rsi_v1) with diffs and metadata |
+| `configs/` | `cadence.yaml` (current models and loop), `play.yaml`, `mock.yaml`, `api.yaml`; others are from earlier runs |
+| `deploy/` | Container entrypoint, GCP VM / IAP / HTTPS scripts |
+| `knowledge/` | Chronological build log and raw result files |
+| `docs/` | Technical report, screenshots |
 
 ## Quickstart
 
-**Easiest:** open the repo in GitHub Codespaces or the VS Code Dev Containers extension. The devcontainer installs Python 3.12, Rust and uv, then runs setup, the tests and a mock game.
-
-**Locally** (needs [uv](https://docs.astral.sh/uv/) and Rust). Exact versions are pinned in `uv.lock` and `Cargo.lock`.
+Requires [uv](https://docs.astral.sh/uv/) and Rust. You can also open the repo in GitHub Codespaces; the devcontainer sets everything up.
 
 ```bash
-make setup     # .venv from uv.lock + Rust extension + gateway binary
-make test      # Rust + Python tests
-make smoke     # one 7-agent self-play game, mock model (no API cost)
-make run       # full RSI loop on the mock (RUN=mock1)
-make serve     # viewer at http://127.0.0.1:8765
+make setup    # Python env from uv.lock, Rust extension and gateway
 ```
-
-## Viewing games and telemetry
-
-- `make viewer RUN=<run>` writes static pages to `runs/<run>/index.html`. You can open them directly, or zip the run folder to share it.
-- `make serve RUN=<run>` serves the same pages. It rebuilds the overview as new games finish and shows **live gateway telemetry**, refreshed every 5 seconds: requests, cache hits, estimated cost, tokens, latency percentiles, queue depth and retries.
-- **Run overview:** baseline, a table per generation, every gate decision with its bootstrap CI, human-test results, and a list of games.
-- **Game page:** the rendered board with each phase's orders (use the arrow keys to step through phases). It shows every message with the sender's private intent, the receiver's p_lie, its decision and reasoning, and the outcome (lie caught / fooled / false alarm). It also shows orders, supply centres and isolation-leak counts. This is the **privileged** view; players never see it.
-- CI uploads the viewer for a mock run as a build artifact on every push.
-
-## Live multi-model demo (OpenRouter)
-
-There are four agent-controlled countries on the standard map, each played by a different lab's model. The other three countries are uncontrolled. Claude Opus 5.5 is the privileged judge. See `configs/live_demo.yaml`.
 
 ```bash
-# .env: PLAYER_API_BASE / REVIEWER_API_BASE = https://openrouter.ai/api/v1, keys = your OpenRouter key
-scripts/gateways.sh
-python -m rsi.loop run --config configs/live_demo.yaml --run-name live1
-python -m rsi.viewer serve runs/live1 --gateway player=http://127.0.0.1:9000 --gateway judge=http://127.0.0.1:9001
+make test     # 43 Python + 15 Rust tests
 ```
-
-Game pages update in place while a game is being played: a live feed, the board, and messages with intent, p_lie and outcome. Each page also has a **decision-trace graph** per phase. Its edges run plan → message → judgment → (cited in) later plan/orders → orders → supply-centre change, and clicking a node shows that agent's reasoning.
-
-> The OpenRouter account needs credits. On the free tier with $0 credit, OpenRouter rejects parallel requests with `402 in_flight_budget_exhausted`, because it reserves `max_tokens × price` for every request in flight.
-
-## Real API run
 
 ```bash
-cp .env.example .env            # fill in provider URLs, keys, prices, budgets
-scripts/gateways.sh             # player gateway :9000, reviewer gateway :9001
-python -m rsi.loop human-stats --config configs/api.yaml
-python -m rsi.loop smoke       --config configs/api.yaml
-python -m rsi.loop run         --config configs/api.yaml --run-name sprint1
-python -m rsi.loop final-test  --config configs/api.yaml --run-name sprint1   # exactly once
-python -m rsi.loop report      --run-name sprint1
+make smoke    # one self-play game on the mock model (no API cost)
 ```
 
-## Components
-| Path | What |
+```bash
+make run      # full RSI loop on the mock model
+```
+
+```bash
+make serve    # dashboard at http://127.0.0.1:8765
+```
+
+## Running with real models
+
+1. **Configure.** Copy `.env.example` to `.env` and fill in your OpenRouter key, prices and budget caps.
+2. **Start the gateways:** `scripts/gateways.sh` (players on :9000, judge on :9001).
+3. **Run continuous RSI and its dashboard:**
+
+```bash
+python -m rsi.continuous --config configs/cadence.yaml --run-name run1 --games 10 --forever --stop-usd 20
+```
+
+```bash
+python -m rsi.viewer serve runs/run1 --gateway player=http://127.0.0.1:9000 --gateway judge=http://127.0.0.1:9001
+```
+
+Other entry points:
+
+| Command | What it does |
 |---|---|
-| `crates/rsi-gateway` | Rust OpenAI-compatible gateway in front of the APIs. Content-addressed response cache, so reruns are free. USD/token budget. 429 retries that honour `Retry-After`. Priority admission. `/stats`, `/metrics`. `bench` load generator. |
-| `crates/rsi-core` | Rust (PyO3): weighted lie-detection metrics matching sklearn, a paired cluster bootstrap, an n-gram contamination index, and an Aho-Corasick prompt leak guard. |
-| `rsi/env` | Diplomacy engine wrapper, private bilateral message bus, and a private vault with isolation checks on every prompt. |
-| `rsi/agents` | Player (send / judge / orders) and privileged reviewer. Mock policies let everything run without a model. |
-| `rsi/evolve.py`, `rsi/gate.py` | Playbook evolution (diff voting, candidates, mined exemplars, Pareto front) and the acceptance gate (self-play bootstrap plus a human-val transfer check). |
-| `rsi/human_data.py`, `rsi/contamination.py` | Human benchmark loader (handles its label quirks), plus dedup, memorisation probe and paraphrase test. |
-| `rsi/decision_graph.py` | Opt-in structured judgments (`loop.structured_judgments: true`). Receivers answer with a decision graph: claims, evidence cited by message id, and log-odds steps from the base rate. Every judgment gets automatic checks (citations of unseen messages, contradictions cited without an adjustment, stated vs implied p_lie). The reviewer and the causal graph use it. |
+| `python -m rsi.learn_human` | Opus learns a playbook from human train games |
+| `python -m rsi.play --power FRANCE --months 12` | Play a game yourself, at `http://127.0.0.1:8770/ui/play/` |
+| `python -m rsi.loop final-test ... --genome <playbook>` | One-time held-out test evaluation |
 
-## Gateway
+**Budget note:** OpenRouter reserves `max_tokens × price` for every in-flight request. Low-credit or workspace-capped keys reject parallel calls (402/403). The harness detects this and stops rather than recording failed calls as results.
 
-```bash
-cargo build --release -p rsi-gateway
-./target/release/rsi-gateway serve --upstream https://YOUR_PROVIDER/v1 --cache-path runs/cache.bin --max-inflight 64 --usd-budget 50
-./target/release/rsi-gateway bench --target http://127.0.0.1:9000/v1 --concurrency 1,8,32,64
-```
+## Deployment
 
-Request headers it understands:
-- `x-rsi-priority: high|normal|low`
-- `x-rsi-run: <name>` (per-run accounting)
-- `x-rsi-cache: off`
+One container runs everything: gateways, loop, dashboards and play server. `deploy/gcp/` sets it up on a Compute Engine VM:
+- the API key in Secret Manager
+- an IAP-only firewall
+- optional public HTTPS with Caddy, where dashboards are open and the play page needs a password
+
+See [deploy/gcp/README.md](deploy/gcp/README.md).
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md) | What was built, results, what worked and what did not, limitations |
+| [knowledge/2026-11-22-build-report.md](knowledge/2026-11-22-build-report.md) | Chronological build log with every decision and incident |
+| [playbooks/](playbooks/) | Playbook versions with the changes each version made |
+| [PLAN.md](PLAN.md) | The original design document (partly superseded: the self-hosting and weight-training stages were dropped) |
+
+## Acknowledgements
+
+- **Data:** Peskov, Cheng, Elgohary, Barrow, Danescu-Niculescu-Mizil and Boyd-Graber, *It Takes Two to Lie: One to Lie, and One to Listen*, ACL 2020 ([data](https://github.com/DenisPeskoff/2020_acl_diplomacy)).
+- **Game engine:** the [MILA diplomacy](https://github.com/diplomacy/diplomacy) adjudicator.
+- **Contributions:** structured judgments and the human-train gate by [@dshkol](https://github.com/dshkol).
