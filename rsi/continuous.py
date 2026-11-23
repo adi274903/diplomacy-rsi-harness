@@ -34,7 +34,14 @@ from rsi.judge import EvalIncomplete, EvalStore
 from rsi.llm import make_llm
 from rsi.loop import RSIStatus, _progress, seat_models
 from rsi.runner import run_game
-from rsi.score import compare, evaluate
+from rsi.score import arrays, compare, evaluate
+from rsi import core
+
+
+def tuned(items, results) -> tuple[float, float]:
+    """Lie-F1-maximising cutoff on these items (picked on the select games, applied elsewhere)."""
+    y, p, w, _, _ = arrays(items, results)
+    return core.best_f1_threshold(y, p, w)
 from rsi.standings import game_result, short_model, standings
 
 LENGTHS = [3, 6, 9, 12, 15, 18, 21, 24]     # months; 14 and 20 round up to the 3-month game clock
@@ -99,8 +106,12 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
     s = {"incumbent": start, "version": 0, "queue": [], "running": {}, "updates": 0}
     lock = asyncio.Lock()
 
-    m0 = evaluate(select_items, await store.get(start, "select", select_items, llm), start.threshold)
+    r0 = await store.get(start, "select", select_items, llm)
+    m0 = evaluate(select_items, r0, start.threshold)
+    thr0, f0 = tuned(select_items, r0)
+    m0.update(tuned_threshold=thr0, lie_f1_tuned=f0)
     versions = [{"version": 0, "hash": start.hash, "name": start.name, "select": m0, "t": time.strftime("%H:%M:%S")}]
+    s["thr"] = {start.hash: thr0}
     _log(run_dir, {"event": "start", **versions[0]})
     lengths = [rng.choice(LENGTHS) for _ in range(n_games)]
     counter = {"next": n_games}
@@ -178,12 +189,17 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
             for players in s["running"].values():          # every running agent reads it from its next message
                 for pl in players.values():
                     pl.genome = best
-            m = best_d.sim_metrics["candidate"]
+            m = dict(best_d.sim_metrics["candidate"])
+            thr, f1t = tuned(select_items, await store.get(best, "select", select_items, llm))
+            m.update(tuned_threshold=thr, lie_f1_tuned=f1t)
+            s["thr"][best.hash] = thr
             versions.append({"version": s["version"], "hash": best.hash, "name": best.name, "select": m,
                              "t": time.strftime("%H:%M:%S"), "from_games": ids})
             st.update(event=f"playbook v{s['version']} ({best.name}) is live in {len(live)} running game(s); "
                             f"select AUPRC {m.get('auprc', float('nan')):.3f}",
                       incumbent=RSIStatus.playbook(best) | {"version": s["version"]}, versions=versions)
+            st.update(event=f"v{s['version']} lie-F1 on the select games: {m.get('lie_f1', 0):.3f} at 0.5, "
+                            f"{f1t:.3f} at its tuned cutoff {thr:.2f}")
         else:
             st.update(event=f"update {u}: no candidate passed the gate; playbook stays v{s['version']}")
         _log(run_dir, {"event": "update", "update": u, "games": ids, "messages": n_msgs, "accepted": bool(best),
@@ -247,7 +263,11 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
     out = {"games": n_games, "lengths": lengths, "updates": s["updates"], "versions": versions,
            "start": start.hash, "final": final_g.hash, "final_name": final_g.name, "report_games": report_games,
            "report": {"start": evaluate(report_items, a, start.threshold),
-                      "final": evaluate(report_items, b, final_g.threshold)},
+                      "final": evaluate(report_items, b, final_g.threshold),
+                      # cutoffs tuned on the select games only, then applied to the untouched report games
+                      "start_tuned": evaluate(report_items, a, s["thr"].get(start.hash, 0.5)),
+                      "final_tuned": evaluate(report_items, b, s["thr"].get(final_g.hash, 0.5))},
+           "judge_model": cfg.llm.model,
            "paired": compare(report_items, a, b, ("auprc", "lie_f1", "ece"), lc.bootstrap_n, lc.seed)
            if final_g.hash != start.hash else None,
            "standings": standings(run_dir)["by_model"]}

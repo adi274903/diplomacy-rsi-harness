@@ -3,7 +3,7 @@
 llm:
   backend: http
   base_url: http://127.0.0.1:9000/v1
-  model: thinkingmachines/inkling-2-mini      # also the judge for gate / report items
+  model: thinkingmachines/inkling-2-small     # lie judge for gate / report items (players use model_pool)
   effort_mode: openrouter
   json_mode: none
   max_connections: 96
