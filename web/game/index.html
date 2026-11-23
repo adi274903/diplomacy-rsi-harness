@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diplomacy Live</title>
+<meta name="description" content="Spectator view of the live self-play Diplomacy game: board, negotiations with private intents and judgments, orders.">
+<meta name="color-scheme" content="dark light">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+<link rel="stylesheet" href="app.css">
+<script>
+  // Apply a saved theme before first paint (per-viewer convenience only).
+  try { var t = localStorage.getItem('dip-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#talk">Skip to negotiations</a>
+
+<header class="bar">
+  <a class="brand" href="./" aria-label="Diplomacy Live, spectator view">
+    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="15" fill="currentColor" opacity=".12"/>
+      <path d="M16 4 L19 14 L28 16 L19 18 L16 28 L13 18 L4 16 L13 14 Z" fill="currentColor"/>
+    </svg>
+    <span>Diplomacy <em>Live</em></span>
+  </a>
+  <div class="bar-mid">
+    <span class="live" id="live" data-state="connecting"><span class="pulse" aria-hidden="true"></span><span id="liveText">Connecting</span></span>
+    <a class="chip" id="rsiChip" href="/ui/rsi/" title="Open the RSI dashboard"><span class="chip-k">RSI</span> <span id="rsiText">…</span></a>
+  </div>
+  <div class="bar-end">
+    <span class="meter" title="Estimated spend across player and judge gateways"><span class="meter-k">Spend</span> <b id="spend">–</b></span>
+    <span class="meter" title="Median player model latency"><span class="meter-k">p50</span> <b id="p50">–</b></span>
+    <button class="icon-btn" id="themeBtn" type="button" aria-label="Switch colour theme">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" fill="currentColor"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="page">
+  <section class="title-row" aria-labelledby="phaseTitle">
+    <div>
+      <h1 id="phaseTitle"><span id="phaseSeason">Waiting for a game</span> <span class="h1-sub" id="phaseKind"></span></h1>
+      <p class="finding" id="finding">Looking for the game being played now…</p>
+    </div>
+    <div class="title-actions">
+      <span class="game-id" id="gameId"></span>
+      <a class="text-link" id="graphLink" href="#" hidden>Decision graph</a>
+    </div>
+  </section>
+
+  <section class="intermission" id="intermission" hidden aria-live="polite">
+    <div class="winner" id="winner" hidden>
+      <p class="winner-kicker" id="winnerKicker"></p>
+      <h2 class="winner-name" id="winnerName"></h2>
+      <p class="winner-sub" id="winnerSub"></p>
+    </div>
+    <div class="im-head">
+      <span class="breathe" aria-hidden="true"></span>
+      <div>
+        <h2 id="imTitle">Game over</h2>
+        <p id="imLine"></p>
+      </div>
+    </div>
+    <div class="im-body">
+      <div>
+        <h3>Final supply centres</h3>
+        <ol class="final" id="imFinal"></ol>
+      </div>
+      <div>
+        <h3>Between games</h3>
+        <ul class="events" id="imEvents"></ul>
+      </div>
+    </div>
+  </section>
+
+  <div class="seats-head">
+    <h2>Seats this game</h2>
+    <p>Models rotate to a different country every game, so each card shows who holds the seat now and who held it last game.</p>
+  </div>
+  <section class="powers" id="powers" aria-label="Agent countries"></section>
+
+  <div class="stage">
+    <div class="col-board">
+      <section class="panel board-panel" aria-labelledby="boardTitle">
+        <div class="panel-head">
+          <h2 id="boardTitle">Board</h2>
+          <p class="panel-note" id="boardNote"></p>
+        </div>
+        <div class="board" id="board">
+          <img id="mapA" alt="" decoding="async">
+          <img id="mapB" alt="" decoding="async">
+          <p class="board-empty" id="boardEmpty">The board appears once the first phase resolves.</p>
+        </div>
+        <div class="timeline">
+          <div class="scrub" id="scrub" role="listbox" aria-label="Phase timeline" aria-orientation="horizontal"></div>
+          <button class="btn-live" id="toLive" type="button" hidden>Jump to live</button>
+        </div>
+        <p class="leader-line" id="leaderLine" aria-live="polite"></p>
+      </section>
+
+      <section class="panel orders-panel" aria-labelledby="ordersTitle">
+        <div class="panel-head">
+          <h2 id="ordersTitle">Orders</h2>
+          <p class="panel-note" id="ordersNote"></p>
+        </div>
+        <div class="orders" id="orders"></div>
+      </section>
+
+      <section class="panel lb-panel" aria-labelledby="lbTitle">
+        <div class="panel-head">
+          <h2 id="lbTitle">Model leaderboard</h2>
+          <p class="panel-note" id="lbNote">Loading standings…</p>
+        </div>
+        <div class="lb">
+          <div class="lb-table-wrap">
+            <table class="lb-table">
+              <thead><tr><th scope="col">Model</th><th scope="col" class="num">Wins</th><th scope="col" class="num">Mean centres</th><th scope="col">Countries played</th></tr></thead>
+              <tbody id="lbBody"></tbody>
+            </table>
+            <p class="lb-empty" id="lbEmpty" hidden>No finished games yet. The table fills in as games end.</p>
+          </div>
+          <div class="results">
+            <h3>Results by game</h3>
+            <ol id="results"></ol>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel talk" id="talk" aria-labelledby="talkTitle">
+      <div class="panel-head talk-head">
+        <h2 id="talkTitle">Negotiations</h2>
+        <p class="spectator"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5C6.5 5 2.7 9.2 1.5 12c1.2 2.8 5 7 10.5 7s9.3-4.2 10.5-7C21.3 9.2 17.5 5 12 5zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z" fill="currentColor"/></svg>
+          Spectator view: you see each sender's private intent and each receiver's private judgment. The players never do.</p>
+      </div>
+      <div class="pairs" id="pairs" role="tablist" aria-label="Conversation"></div>
+      <div class="thread-wrap">
+        <div class="thread" id="thread" aria-live="polite" aria-relevant="additions" tabindex="0" aria-label="Messages"></div>
+        <button class="new-pill" id="newPill" type="button" hidden>New messages</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

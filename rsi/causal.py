@@ -122,3 +122,66 @@ def phase_graph(rec: dict, phase: str) -> dict:
 def game_graphs(rec: dict) -> dict[str, dict]:
     phases = rec.get("phases") or [h["phase"] for h in rec.get("sc_history", [])]
     return {ph: phase_graph(rec, ph) for ph in phases}
+
+
+# ---- whole-game trace (added for the RSI dashboard; phase_graph/game_graphs are unchanged) ----------
+
+def deception_chains(rec: dict, phase: str, graph: dict, prefix: str = "") -> list[dict]:
+    """For every deceptive message in `phase`: the node path sender plan -> message -> receiver's
+    judgment -> receiver's later plan / orders -> receiver's SC change. `cited` says whether the
+    receiver's later reasoning names the sender (a "cited" edge), i.e. whether the link from the
+    judgment onwards is attributed in the traces or only structural (same phase, same receiver)."""
+    ids = {n["id"] for n in graph["nodes"]}
+    sends = {int(k): v for k, v in rec["sends"].items()}
+    judg = {int(k): v for k, v in rec["judgments"].items()}
+    cited = {(e["from"], e["to"]) for e in graph["edges"] if e["kind"] == "cited"}
+    out = []
+    for m in rec["messages"]:
+        if m["phase"] != phase or sends.get(m["id"], {}).get("intent") != "deceptive":
+            continue
+        snd, recv, r = m["sender"], m["recipient"], m["round"]
+        path = [f"plan{r}:{snd}", f"msg:{m['id']}", f"judge:{m['id']}"]
+        if r == 1 and (f"judge:{m['id']}", f"plan2:{recv}") in cited:
+            path.append(f"plan2:{recv}")
+        path += [f"orders:{recv}", f"sc:{recv}"]
+        j = judg.get(m["id"])
+        outcome = ("unjudged" if not j or not j.get("ok", True) else
+                   "caught" if j["decision"] == "distrust" else "fooled")
+        out.append({"msg_id": m["id"], "phase": phase, "sender": snd, "recipient": recv, "round": r,
+                    "outcome": outcome, "p_lie": j["p_lie"] if j else None,
+                    "cited": any(a == f"judge:{m['id']}" for a, _ in cited),
+                    "path": [prefix + i for i in path if i in ids]})
+    return out
+
+
+def game_trace(rec: dict) -> dict:
+    """All phases of a game on one canvas: each phase's decision graph (node ids prefixed with
+    "<phase>|"), plus "carry" edges linking a power's last decision in one phase to its first
+    decision in the next (its memory notes and the adjudicated board carry over), so an agent's
+    reasoning can be followed across the whole game."""
+    phases = rec.get("phases") or [h["phase"] for h in rec.get("sc_history", [])]
+    nodes, edges, chains, powers = [], [], [], None
+    first: dict[str, list[tuple[int, str]]] = {}
+    last: dict[str, list[tuple[int, str]]] = {}
+    for i, ph in enumerate(phases):
+        g = phase_graph(rec, ph)
+        powers = powers or g["powers"]
+        pre = ph + "|"
+        for n in g["nodes"]:
+            nodes.append({**n, "id": pre + n["id"], "phase": ph, "pi": i})
+        for e in g["edges"]:
+            edges.append({**e, "from": pre + e["from"], "to": pre + e["to"], "phase": ph})
+        chains += deception_chains(rec, ph, g, pre)
+        for p in g["powers"]:
+            mine = [n for n in g["nodes"] if n["power"] == p and n["kind"] in ("plan", "orders")]
+            if mine:
+                first.setdefault(p, []).append((i, pre + min(mine, key=lambda n: n["col"])["id"]))
+                last.setdefault(p, []).append((i, pre + max(mine, key=lambda n: n["col"])["id"]))
+    for p, lasts in last.items():
+        firsts = dict(first.get(p, []))
+        for i, nid in lasts:
+            nxt = next((firsts[k] for k in sorted(firsts) if k > i), None)
+            if nxt:
+                edges.append({"from": nid, "to": nxt, "kind": "carry", "label": "memory", "phase": phases[i]})
+    return {"phases": phases, "powers": powers or [], "cols": COLS, "nodes": nodes, "edges": edges,
+            "chains": chains}
