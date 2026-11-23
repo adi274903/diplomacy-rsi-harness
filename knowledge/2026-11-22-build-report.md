@@ -287,3 +287,38 @@ Before this, an outage could be cached as p_lie 0.5 and look like a normal "reje
 **Ready to run once the OpenRouter workspace budget is raised:**
 1. The held-out test: `python -m rsi.loop final-test --config configs/live_one.yaml --run-name test_human_v2 --genome playbooks/human_v2.json --test-truth-ratio 4`. It reports v0 vs human-v2 vs the actual human receivers, with paired bootstrap CIs and original and paraphrased variants. Estimated cost about $2.
 2. The PR check run: `configs/check_prs.yaml`.
+
+## 11. Held-out test result: human-v2 vs v0 vs human receivers (run once, locked)
+
+**Setup:**
+- Inkling 2 Mini judged human test games 4 and 12.
+- All 240 lies were included, plus 4 truths per lie. The truths are weighted back to the natural 8.8% lie rate, giving 1,200 items.
+- Temperature calibration was fit on validation.
+- Raw output: [results/2026-11-22-test-human_v2-vs-v0.json](results/2026-11-22-test-human_v2-vs-v0.json).
+
+| Judge | Lie-F1 @0.5 | Macro-F1 | AUPRC | AUROC | ECE | ECE after calibration |
+|---|---|---|---|---|---|---|
+| Actual human receivers (n=1,082 annotated) | 0.236 | 0.589 | 0.124 | 0.578 | — | — |
+| Inkling + v0 | 0.218 | 0.551 | 0.150 | 0.671 | 0.275 | 0.146 |
+| Inkling + human-v2 | 0.184 | 0.563 | 0.195 | 0.729 | 0.143 | 0.053 |
+
+**Paired cluster bootstrap, human-v2 minus v0 (95% CI):**
+
+| Metric | Δ | 95% CI | p_gain | Paraphrased test |
+|---|---|---|---|---|
+| AUPRC | +0.044 | [+0.016, +0.087] | 1.00 | +0.057, p_gain 1.00 |
+| ECE | −0.132 | — | 1.00 | — |
+| Lie-F1 | −0.035 | [−0.093, +0.011] | — | not significant |
+| Macro-F1 | +0.013 | — | — | not significant |
+
+**Reading:**
+- The human-learned playbook significantly improves how well Inkling *ranks* lies, and it halves calibration error.
+- Both LLM setups rank lies better than the human receivers did (AUROC 0.67–0.73 vs 0.58).
+- At the fixed 0.5 cutoff, lie-F1 did not improve. The playbook's "lies are rare" calibration pushes fewer messages over 0.5. With the best threshold, F1 is 0.273 vs 0.253, but that threshold was picked on test and is therefore optimistic.
+- **Next:** tune `Genome.threshold` on non-test data.
+- **Memorisation:** the probe got 0 of 200 verbatim continuations, and paraphrased scores match the originals, so there is no sign of memorisation.
+
+**Caveats:**
+- One judge model.
+- 240 lies, so CIs are wide for F1.
+- The training-channel overlap check in this run covered 0 texts, because the genome was passed with `--genome`. human-v2 was linted against the test n-grams when it was learned (0 rejections).
