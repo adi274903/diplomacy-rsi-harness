@@ -11,6 +11,7 @@ A harness for recursive self-improvement on reasoning-traced trust decisions in 
 - **RSI dashboard:** https://34-59-183-174.sslip.io/ui/rsi/. Playbook versions, Opus's edits, gate verdicts, F1 and AUPRC per version, standings, and the decision-graph explorer.
 - **Live game view:** https://34-59-183-174.sslip.io/ui/game/. Board, messages with intent and judgment reveals, a model per country, and a link to each game's decision-trace graph.
 - **Play against the models:** https://34-59-183-174.sslip.io/ui/play/. Password-protected.
+- **Example game played entirely with rsi-v1:** https://34-59-183-174.sslip.io/ui/game/?f=/games/game_v1demo.html. 21 months, 43 messages, 5 lies, **4 caught**. Its decision-trace graph is at https://34-59-183-174.sslip.io/games/game_v1demo.html.
 
 These run on a Compute Engine VM in project `rsitry` (see [deploy/gcp/README.md](deploy/gcp/README.md)). The dashboards show the run where Opus's self-play refinement **rsi-v1** was accepted, at 99% gate confidence:
 - gate AUPRC 0.107 → 0.142
