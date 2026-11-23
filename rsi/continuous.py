@@ -229,7 +229,10 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
         _progress(f"[{gid}] finished after {months} months; leader: "
                   + " & ".join(f"{p} ({short_model(m)})" for p, m in zip(r["winners"], r["winner_models"])))
         s["queue"].append(rec)
-        await update()
+        # review in the background: the slot starts its next game right away instead of idling
+        # while Opus judges (updates still run one at a time under the lock)
+        s.setdefault("tasks", set()).add(t := asyncio.get_running_loop().create_task(update()))
+        t.add_done_callback(s["tasks"].discard)
         return rec
 
     async def slot(i: int) -> list:
@@ -254,6 +257,8 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
     fatal = [x for x in results if isinstance(x, EvalIncomplete)]
     if fatal:
         raise fatal[0]
+    if s.get("tasks"):
+        await asyncio.gather(*list(s["tasks"]), return_exceptions=True)
     await update(force=True)
 
     st.update("final report", f"scoring v0 vs final playbook on human games {report_games} (never selected on)")
