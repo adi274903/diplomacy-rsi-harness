@@ -47,6 +47,9 @@ loop:
   label_mode: either      # lie = self-labelled deceptive OR the judge found the promise broken
   # Start from the playbook Opus learned from the human games (train+validation; test held out).
   # Validation was used for learning, so the human-validation transfer check is switched off.
-  initial_genome: playbooks/human_v1.json
+  initial_genome: playbooks/human_v2.json
   human_val_gate: false
+  gate_source: auto              # gate on human train games 7-10 when self-play has < min_gate_lies lies (PR #2)
+  human_gate_truth_ratio: 2      # all 158 gate-game lies + 2 truths per lie (~470 items)
+  structured_judgments: true     # receivers answer with claims / evidence / adjustments (PR #1)
   sim_gate_truth_ratio: 6

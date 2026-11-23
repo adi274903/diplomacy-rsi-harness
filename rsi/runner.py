@@ -278,6 +278,9 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
         if svg:
             (maps_dir / f"{env.phase}.svg").write_text(svg)
 
+    if error is None and stats.calls >= 10 and stats.failed_calls / stats.calls > 0.5:
+        # mostly failed API calls (outage / exhausted budget): not a real game, exclude it
+        error = f"api_failures: {stats.failed_calls}/{stats.calls} calls failed; last: {(stats.errors or [''])[-1][:200]}"
     final = record("error" if error else "finished")
     _write_json(out_dir / f"game_{game_id}.json", final)
     with open(out_dir / f"dialogs_{game_id}.jsonl", "w") as f:

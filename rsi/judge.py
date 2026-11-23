@@ -74,8 +74,18 @@ async def judge_items(genome: Genome, items: list[JudgeItem], llm, *, priority: 
     return list(await asyncio.gather(*(one(it) for it in items)))
 
 
+class EvalIncomplete(RuntimeError):
+    """Too many judge calls failed (e.g. provider outage or exhausted budget); results are not usable."""
+
+
 class EvalStore:
-    """Caches per-(genome hash, item set) results on disk so the incumbent is never re-judged."""
+    """Caches per-(genome hash, item set) results on disk so the incumbent is never re-judged.
+
+    Failed calls are retried once and never cached: a cached failure would score as p_lie 0.5 forever
+    and could turn an API outage into a plausible-looking gate verdict.
+    """
+
+    min_ok_rate = 0.9
 
     def __init__(self, root: str | Path):
         self.root = Path(root)
@@ -91,7 +101,17 @@ class EvalStore:
             if [r.item_id for r in rows] == [it.item_id for it in items]:
                 return rows
         rows = await judge_items(genome, items, llm, **kw)
-        p.write_text("".join(json.dumps(asdict(r)) + "\n" for r in rows))
+        failed = [i for i, r in enumerate(rows) if not r.ok]
+        if failed:   # one retry for the failures only (different salt = different seed)
+            retry = await judge_items(genome, [items[i] for i in failed], llm, salt="retry", **kw)
+            for i, r in zip(failed, retry):
+                rows[i] = r
+        ok_rate = sum(r.ok for r in rows) / max(1, len(rows))
+        if ok_rate < self.min_ok_rate:
+            raise EvalIncomplete(f"{set_name} for {genome.name} ({genome.hash}): only {ok_rate:.0%} of "
+                                 f"{len(rows)} judge calls succeeded; not caching or scoring")
+        if ok_rate == 1.0:
+            p.write_text("".join(json.dumps(asdict(r)) + "\n" for r in rows))
         return rows
 
 

@@ -1,5 +1,7 @@
 # Playbook `human-v1` (a7a4d7f1fa93)
 
+> **Superseded by [human_v2](human_v2.md).** v1 was learned from all train games, including 7–10, which `loop.gate_source: human_train|auto` uses as gate games, so gating a v1-descended playbook there would be optimistic. v2 excludes them.
+
 Learned by **anthropic/claude-opus-5.5** from labelled human Diplomacy games (Peskov et al. 2020, train + validation splits). Test split held out and linted against.
 
 84 lessons from 14 batches were merged into 18 heuristics (0 dropped by lint).

@@ -249,3 +249,41 @@ python -m rsi.viewer serve runs/watch1 --dev --gateway player=http://127.0.0.1:9
 - [Tinker docs: OpenAI-compatible inference](https://tinker-docs.thinkingmachines.ai/inference/openai/overview/)
 - [OpenRouter API](https://openrouter.ai/docs)
 - MILA `diplomacy` engine: https://github.com/diplomacy/diplomacy
+
+---
+
+## 10. Addendum (later on 2026-11-22): human-learned playbook, PR checks, budget incident
+
+**Opus learned a playbook from the human games:**
+- **human-v1:** learned from train and validation. It is **superseded**: it had also seen train games 7–10, which PR #2 uses as gate games.
+- **human-v2** ([playbooks/human_v2.md](../playbooks/human_v2.md)):
+  - learned from games 1, 2, 3, 5, 6 and 11 only (10,198 messages)
+  - 20 heuristics, 0 lint rejections
+  - test games (4, 12) and gate games (7–10) were held out and linted against
+  - cost about $1.13
+
+  It is now the starting playbook in `configs/live_one.yaml`, with the human-validation transfer check off, since validation was used for learning.
+
+**Teammate PRs (dshkol):**
+- #1 (structured judgments) and #2 (human-train gate fallback) are merged.
+- #3 (deception incentive) is still open: it conflicts with main, and its prompt change would also reach receivers.
+
+**Real-model checks:**
+- **PR #2 works as designed.** Self-play gave 0 lies even with broken-promise labels, so the gate fell back to human train games 7–10: 474 items, 158 lies.
+- **PR #1 structured judgments:** valid data from one game, before the budget incident (below), shows 90% of judgments usable (56/62), with 10 of 82 calls failing. Plain judgments fail about 1–3% of the time. The larger schema costs reliability on Inkling 2 Mini.
+
+**Budget incident:**
+- The OpenRouter key belongs to a workspace with a **$5.00 lifetime budget**, separate from the key's own $50 limit and from our gateway caps.
+- At $5.16 spent, every call returned `403 Workspace lifetime budget exceeded`. Generation 1 of the check run and the held-out test evaluation ran on failed calls.
+- Both were discarded: `runs/check1_INVALID_openrouter_budget/`, and no `TEST_LOCK`, so **the one-time test is still unused**.
+
+**Harness fixes from this:**
+- Failed judge calls are retried once and **never cached**. If fewer than 90% succeed, the eval raises `EvalIncomplete`: the run aborts instead of producing a gate verdict.
+- `final-test` refuses to write `TEST_LOCK`.
+- Games where more than 50% of calls failed are marked `api_failures` and excluded.
+
+Before this, an outage could be cached as p_lie 0.5 and look like a normal "rejected" verdict.
+
+**Ready to run once the OpenRouter workspace budget is raised:**
+1. The held-out test: `python -m rsi.loop final-test --config configs/live_one.yaml --run-name test_human_v2 --genome playbooks/human_v2.json --test-truth-ratio 4`. It reports v0 vs human-v2 vs the actual human receivers, with paired bootstrap CIs and original and paraphrased variants. Estimated cost about $2.
+2. The PR check run: `configs/check_prs.yaml`.

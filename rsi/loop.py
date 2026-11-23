@@ -25,12 +25,18 @@ from rsi.evolve import (FrontEntry, aggregate_diffs, effort_candidate, exemplar_
                         pareto_front, propose_candidates)
 from rsi.gate import choose_gate_set, gate
 from rsi.genome import Genome, default_genome
-from rsi.judge import EvalStore, balance, items_from_game, judge_items
+from rsi.judge import EvalIncomplete, EvalStore, balance, items_from_game, judge_items
 from rsi.league import League
 from rsi.llm import make_llm
 from rsi.runner import run_game
 from rsi.standings import game_result, short_model, standings
-from rsi.score import apply_temperature, arrays, evaluate, fit_temperature
+from rsi.score import apply_temperature, arrays, compare, evaluate, fit_temperature
+
+
+def ItemResultCopy(r):  # noqa: N802 - snapshot before calibration mutates p_lie
+    from dataclasses import replace
+
+    return replace(r)
 
 
 def _log(run_dir: Path, name: str, row: dict) -> None:
@@ -129,6 +135,13 @@ def cmd_human_stats(cfg: Config) -> None:
 
 
 async def cmd_run(cfg: Config, run_dir: Path) -> None:
+    try:
+        await _cmd_run(cfg, run_dir)
+    except EvalIncomplete as e:
+        raise SystemExit(f"[abort] judge calls are failing, so no gate verdict can be trusted: {e}") from e
+
+
+async def _cmd_run(cfg: Config, run_dir: Path) -> None:
     lc, rng = cfg.loop, random.Random(cfg.loop.seed)
     llm = make_llm(cfg.llm)
     reviewer = Reviewer(make_llm(cfg.reviewer) if cfg.reviewer_llm else llm, effort=cfg.reviewer_effort)
@@ -268,20 +281,41 @@ async def cmd_run(cfg: Config, run_dir: Path) -> None:
     await llm.aclose()
 
 
-async def cmd_final_test(cfg: Config, run_dir: Path, force: bool) -> None:
+def _human_receiver_baseline(splits, items) -> dict:
+    """The actual human receivers' own calls on the same test items (NOANNOTATION rows dropped)."""
+    from rsi.judge import ItemResult
+
+    rows = {f"h{r.game_id}:{r.split}:{r.dialog}:{r.rel_idx}": r for d in splits["test"] for r in d}
+    sub = [it for it in items if rows[it.item_id].receiver_trusts is not None]
+    res = [ItemResult(it.item_id, 1.0 if rows[it.item_id].receiver_trusts is False else 0.0,
+                      "distrust" if rows[it.item_id].receiver_trusts is False else "trust", "", [], True)
+           for it in sub]
+    return evaluate(sub, res, 0.5)
+
+
+async def cmd_final_test(cfg: Config, run_dir: Path, force: bool, genome_path: str | None = None,
+                         truth_ratio: int = 0) -> None:
     lock = run_dir / "TEST_LOCK"
     if lock.exists() and not force:
         raise SystemExit(f"test set already evaluated for this run ({lock}); refusing to re-run")
     llm = make_llm(cfg.llm)
     store = EvalStore(run_dir / "evals")
     splits = human_data.load_all(cfg.paths.data)
-    final = Genome.model_validate_json((run_dir / "final_genome.json").read_text())
-    v0 = default_genome(structured=cfg.loop.structured_judgments)
+    final = (Genome.load(genome_path) if genome_path
+             else Genome.model_validate_json((run_dir / "final_genome.json").read_text()))
+    v0 = default_genome(structured=final.structured_judgments)    # same judging mode: isolates the playbook
     val_items = _human_val_items(cfg, splits)
     test_items = human_data.to_items(splits["test"], cfg.game.history_window)
+    if truth_ratio:   # all lies + truth_ratio truths per lie, weighted back to the natural base rate
+        test_items = balance(test_items, truth_ratio, cfg.loop.seed)
     para_items = await paraphrase_items(llm, test_items, run_dir / "paraphrase_test.json", seed=cfg.loop.seed)
+    print(f"[final-test] {len(test_items)} test items ({sum(it.is_lie for it in test_items)} lies), "
+          f"v0 {v0.hash} vs {final.name} {final.hash}", flush=True)
 
-    out = {"final": final.hash, "v0": v0.hash, "results": {}}
+    out = {"final": final.hash, "final_name": final.name, "v0": v0.hash, "n_items": len(test_items),
+           "truth_ratio": truth_ratio, "results": {},
+           "human_receivers": _human_receiver_baseline(splits, test_items)}
+    raw: dict[str, dict] = {}
     for g in (v0, final):
         # calibration is fit on human validation only, then applied to test
         vres = await store.get(g, "human_val", val_items, llm)
@@ -290,12 +324,21 @@ async def cmd_final_test(cfg: Config, run_dir: Path, force: bool) -> None:
         row = {"temperature": t}
         for name, items in (("test", test_items), ("test_paraphrased", para_items)):
             res = await judge_items(g, items, llm, priority="low")
+            ok_rate = sum(r.ok for r in res) / max(1, len(res))
+            if ok_rate < EvalStore.min_ok_rate:   # never burn the one-time test on failed calls
+                raise SystemExit(f"[final-test] aborted: only {ok_rate:.0%} of {g.name} judge calls on {name} "
+                                 "succeeded (provider outage or budget?); TEST_LOCK not written")
+            raw.setdefault(name, {})[g.name] = [ItemResultCopy(r) for r in res]
             row[name] = evaluate(items, res, g.threshold)
             for r in res:
                 r.p_lie = apply_temperature([r.p_lie], t)[0]
             row[name + "_calibrated"] = evaluate(items, res, g.threshold)
         out["results"][g.name] = row
 
+    for name, items in (("test", test_items), ("test_paraphrased", para_items)):
+        a, b = raw[name][v0.name], raw[name][final.name]
+        out.setdefault("paired", {})[name] = compare(items, a, b, ("auprc", "lie_f1", "macro_f1", "ece"),
+                                                     cfg.loop.bootstrap_n, cfg.loop.seed)
     texts = [it.target for it in test_items]
     out["memorization_probe"] = await memorization_probe(llm, texts, seed=cfg.loop.seed)
     exemplars = [e for p in (run_dir / "genomes").glob("*.json") for e in Genome.load(p).exemplars]
@@ -314,6 +357,9 @@ def main() -> None:
     ap.add_argument("--run-name", default=None)
     ap.add_argument("--mock", action="store_true", help="force the mock LLM backend")
     ap.add_argument("--force", action="store_true", help="final-test: allow re-running (recorded)")
+    ap.add_argument("--genome", default=None, help="final-test: playbook to evaluate (default: the run's final)")
+    ap.add_argument("--test-truth-ratio", type=int, default=0,
+                    help="final-test: all lies + N truths per lie, reweighted (0 = every test message)")
     ap.add_argument("--end-year", type=int, default=None, help="override game.end_year")
     a = ap.parse_args()
 
@@ -337,7 +383,7 @@ def main() -> None:
     elif a.command == "run":
         asyncio.run(cmd_run(cfg, run_dir))
     elif a.command == "final-test":
-        asyncio.run(cmd_final_test(cfg, run_dir, a.force))
+        asyncio.run(cmd_final_test(cfg, run_dir, a.force, a.genome, a.test_truth_ratio))
     else:
         from rsi.report import write_report
 

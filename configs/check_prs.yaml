@@ -1,0 +1,56 @@
+# Short verification run for PRs #1 (structured judgments) and #2 (human-train gate): derived from live_one.yaml
+# Watchable RSI demo: ONE game at a time, 4 countries each played by a different lab's model
+# (OpenRouter), messages streamed as each agent finishes writing. After every game the Opus judge
+# reviews it, proposes playbook edits, the gate tests them, and the next game uses the winner.
+#   scripts/gateways.sh
+#   python -m rsi.loop run --config configs/live_one.yaml --run-name watch1
+#   python -m rsi.viewer serve runs/watch1 --gateway player=http://127.0.0.1:9000 --gateway judge=http://127.0.0.1:9001
+#   open http://127.0.0.1:8765/live
+llm:
+  backend: http
+  base_url: http://127.0.0.1:9000/v1
+  model: thinkingmachines/inkling-2-mini
+  effort_mode: openrouter
+  json_mode: none
+  max_connections: 64
+  max_tokens: {send: 4000, judge: 4000, orders: 4000, item_judge: 3000, review: 8000, text: 400}
+  extra_headers: {X-Title: diplomacy-rsi-harness}
+reviewer_llm:
+  backend: http
+  base_url: http://127.0.0.1:9001/v1
+  model: anthropic/claude-opus-5.5
+  effort_mode: none
+  json_mode: none
+  max_connections: 8
+  max_tokens: {review: 8000, item_judge: 3000, text: 400}
+  extra_headers: {X-Title: diplomacy-rsi-harness}
+game:
+  map_name: standard
+  active_powers: [AUSTRIA, FRANCE, GERMANY, ITALY]
+  # rotated across the 4 countries every game, so no model is tied to a country
+  model_pool:
+    - thinkingmachines/inkling-2-mini
+    - anthropic/claude-haiku-5.5
+    - deepseek/deepseek-v4.1-flash
+    - mistralai/mistral-small-2603
+  end_year: 1902
+  press_rounds: 2
+  max_messages_per_round: 2
+  stream_events: true
+loop:
+  generations: 1
+  games_per_generation: 1
+  parallel_games: 1
+  gate_games: 1
+  candidates: 2
+  patience: 8
+  frozen_share: 0.0
+  label_mode: either      # lie = self-labelled deceptive OR the judge found the promise broken
+  # Start from the playbook Opus learned from the human games (train+validation; test held out).
+  # Validation was used for learning, so the human-validation transfer check is switched off.
+  initial_genome: playbooks/human_v2.json
+  human_val_gate: false
+  gate_source: auto              # gate on human train games 7-10 when self-play has < min_gate_lies lies (PR #2)
+  human_gate_truth_ratio: 2      # all 158 gate-game lies + 2 truths per lie (~470 items)
+  structured_judgments: true     # receivers answer with claims / evidence / adjustments (PR #1)
+  sim_gate_truth_ratio: 6

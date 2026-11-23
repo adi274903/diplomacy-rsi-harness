@@ -2,9 +2,11 @@
 
     python -m rsi.learn_human --config configs/live_one.yaml --out playbooks/human_v1.json
 
-Data rules: the learner sees the TRAIN and VALIDATION splits (games 1-3, 5-11). The TEST split
-(games 4, 12) stays fully held out: every learned heuristic is linted against an 8-gram index of
-the test messages, and test is only ever scored once via `rsi.loop final-test`. Because validation is
+Data rules: the learner sees the TRAIN and VALIDATION splits minus `exclude_games` (default: the
+human-train gate games 7-10 used by `loop.gate_source: human_train|auto`, so the gate never scores a
+playbook on games it was learned from). The TEST split (games 4, 12) stays fully held out. Every
+learned heuristic is linted against an 8-gram index of the test AND gate-game messages, and test is
+only ever scored once via `rsi.loop final-test`. Because validation is
 used for learning, the human-validation transfer gate is optimistic for genomes descended from this
 playbook (set loop.human_val_gate: false).
 
@@ -127,19 +129,25 @@ def _render(card: dict, eid: str) -> str:
     return "\n".join(lines)
 
 
-async def learn(cfg_path: str | None, out: Path, batches: int, per_batch: int, seed: int) -> Genome:
+async def learn(cfg_path: str | None, out: Path, batches: int, per_batch: int, seed: int,
+                exclude_games: list[int] | None = None, name: str = "human-v1") -> Genome:
     cfg = load_config(cfg_path)
     llm = make_llm(cfg.reviewer)            # the judge model is the learner
     splits = human_data.load_all(cfg.paths.data)
-    pool = splits["train"] + splits["validation"]
-    test_index = build_index(human_data.all_texts(splits["test"]))
+    excluded = set(exclude_games or [])
+    learn_split = lambda ds: [d for d in ds if d and d[0].game_id not in excluded]  # noqa: E731
+    held = lambda ds: [d for d in ds if d and d[0].game_id in excluded]            # noqa: E731
+    pool = learn_split(splits["train"]) + learn_split(splits["validation"])
+    games_used = sorted({d[0].game_id for d in pool})
+    test_index = build_index(human_data.all_texts(splits["test"])
+                             + human_data.all_texts(held(splits["train"]) + held(splits["validation"])))
     rng = random.Random(seed)
 
     n_lie = per_batch * 5 // 10
     n_fa = per_batch * 2 // 10
     batches_cards = [_example_cards(pool, rng, n_lie, per_batch - n_lie - n_fa, n_fa) for _ in range(batches)]
-    print(f"[learn] {batches} batches x ~{per_batch} examples from train+validation "
-          f"({sum(len(d) for d in pool)} messages); test held out", flush=True)
+    print(f"[learn] {batches} batches x ~{per_batch} examples from games {games_used} "
+          f"({sum(len(d) for d in pool)} messages); held out: test + games {sorted(excluded)}", flush=True)
 
     sem = asyncio.Semaphore(6)
 
@@ -176,20 +184,22 @@ async def learn(cfg_path: str | None, out: Path, batches: int, per_batch: int, s
         if not errs:
             probe.playbook.append(Heuristic(id=f"H{len(probe.playbook) + 1}", text=h.text))
     genome = Genome(
-        name="human-v1", parent=v0.hash, generation=0, system_prompt=v0.system_prompt,
+        name=name, parent=v0.hash, generation=0, system_prompt=v0.system_prompt,
         playbook=[Heuristic(id=f"H{i + 1}", text=h.text, rationale=f"[{h.kind}, support {h.support}] {h.rationale}",
                             evidence=["human:train+validation"]) for i, (h, _) in enumerate(kept)],
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(genome.model_dump_json(indent=2))
-    meta = {"source": "Peskov et al. 2020 train+validation (games 1-3, 5-11); test (4, 12) held out",
+    meta = {"source": f"Peskov et al. 2020 games {games_used}; held out: test (4, 12) + games {sorted(excluded)}",
+            "games_used": games_used, "excluded_games": sorted(excluded),
             "learner": cfg.reviewer.model, "batches": batches, "per_batch": per_batch, "seed": seed,
             "lessons": [l.model_dump() for l in lessons], "consolidation_notes": draft.notes,
             "rejected_by_lint": [{"text": h.text, "errors": e} for h, e in rejected], "hash": genome.hash}
     out.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
     md = [f"# Playbook `{genome.name}` ({genome.hash})", "",
-          f"Learned by **{cfg.reviewer.model}** from labelled human Diplomacy games "
-          "(Peskov et al. 2020, train + validation splits). Test split held out and linted against.", "",
+          f"Learned by **{cfg.reviewer.model}** from labelled human Diplomacy games (Peskov et al. 2020), "
+          f"games {games_used}. Held out and linted against: test games 4 and 12"
+          + (f", and gate games {sorted(excluded)}" if excluded else "") + ".", "",
           f"{len(lessons)} lessons from {batches} batches were merged into {len(kept)} heuristics "
           f"({len(rejected)} dropped by lint).", ""]
     for kind, title in (("catch_lies", "Catching lies"), ("avoid_false_alarms", "Avoiding false alarms"),
@@ -210,12 +220,16 @@ async def learn(cfg_path: str | None, out: Path, batches: int, per_batch: int, s
 def main() -> None:
     ap = argparse.ArgumentParser(prog="rsi.learn_human")
     ap.add_argument("--config", default="configs/live_one.yaml")
-    ap.add_argument("--out", default="playbooks/human_v1.json")
+    ap.add_argument("--out", default="playbooks/human_v2.json")
+    ap.add_argument("--name", default="human-v2")
+    ap.add_argument("--exclude-games", default="7,8,9,10",
+                    help="comma-separated game ids kept out of learning (default: the human-train gate games)")
     ap.add_argument("--batches", type=int, default=14)
     ap.add_argument("--per-batch", type=int, default=40)
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
-    asyncio.run(learn(a.config, Path(a.out), a.batches, a.per_batch, a.seed))
+    excl = [int(x) for x in a.exclude_games.split(",") if x.strip()]
+    asyncio.run(learn(a.config, Path(a.out), a.batches, a.per_batch, a.seed, excl, a.name))
 
 
 if __name__ == "__main__":
