@@ -9,11 +9,13 @@
 
 We built a harness in which large-language-model agents play the board game Diplomacy against each other. They negotiate in private messages, label their own messages as truthful or deceptive, and judge every message they receive with a lie probability. A stronger model, **Claude Opus 5.5**, acts as a privileged judge: it sees everything, reviews finished games together with each agent's *decision-trace graph*, and rewrites a shared **trust-assessment playbook**. A statistical gate accepts a rewrite only if it improves lie detection on **real human Diplomacy games** from the deception dataset of Peskov et al. (ACL 2020). Accepted playbooks are swapped into every running game immediately. No model weights are trained; all learning happens at the prompt level.
 
+**Scale:** 153 completed self-play games with real models (about 2,800 negotiation messages), 117 game reviews by Opus, 69 candidate playbooks gated, and a 1,200-message held-out human test.
+
 **Main results:**
 1. **Opus learned a playbook from labelled human games** (human-v2). On the held-out human test set it raised AUPRC from 0.150 to **0.195** (95% CI of the gain [+0.016, +0.087]) and halved calibration error (ECE 0.275 → 0.143). The model with this playbook ranks lies better than the human receivers did (AUROC **0.73** vs 0.58).
 2. **The self-play loop produced an accepted refinement** (rsi-v1). Opus derived it from reviewing self-play games. On human gate games it raised AUPRC from 0.107 to **0.142** and lie-F1 from 0.072 to **0.152**, at 99% bootstrap confidence.
 3. **On the paper's headline metric, lie-F1 at a fixed 0.5 cutoff on the test set, we do not beat the supervised baselines:** 18.4 vs 20.9 (Context LSTM+Power+BERT), 27.0 (best model) and 22.5 (humans).
-4. **The loop is "iterated self-improvement with an external critic", not strong RSI:** the critic itself never improves, and gains flattened after one accepted step out of roughly 45 candidates.
+4. **The loop is "iterated self-improvement with an external critic", not strong RSI:** the critic itself never improves, and gains flattened: across the cloud runs, 2 of 69 candidate playbooks were accepted.
 
 ---
 
@@ -265,7 +267,7 @@ The earlier runs used a mixed pool (Claude Haiku 5.5, DeepSeek V4.1 Flash, Mistr
 | **H22** | Default to the 5–10% base rate, never an unexplained 0.5 | Uninformative 0.5 judgments |
 | **H23** | Questions and requests contain no claim, so they cannot be lies | Agents flagged requests as lies |
 
-**After v1:** about 40 further candidates over later updates were all rejected, each lowering AUPRC by 0.05–0.08. Gains flattened after one step.
+**After v1:** every later candidate was rejected, typically lowering AUPRC by 0.05–0.08. Across all cloud runs, 2 of 69 gated candidates were accepted. Gains flattened after one step.
 
 ### 5.4 In-game behaviour (101 games, models rotated across all four countries)
 
@@ -316,7 +318,7 @@ Leaderboard from the run where rsi-v1 was accepted:
 |---|---|---|---|
 | Agents almost never self-label lies | The early gate set had **0 lies**, so AUPRC was undefined and every candidate was rejected | Honesty tuning: models avoid *saying* "deceptive" even privately | Fixed by counting broken promises as lies (`label_mode: either`) and by the human-train gate |
 | Lie-F1 below the paper | 18.4 vs 20.9–27.0 | A conservative calibrated playbook and a fixed 0.5 cutoff | Partly addressed: tuned cutoffs on the selection set; test re-check pending |
-| Gains flatten | 1 accepted of about 45 candidates after the first step | Prompt-only learning saturates; small gate set (72 lies); self-play lessons are about bot errors, not human deception | Open |
+| Gains flatten | 2 of 69 candidates accepted across all runs | Prompt-only learning saturates; small gate set (72 lies); self-play lessons are about bot errors, not human deception | Open |
 | Leak-guard false positives | 3 of 5 early games excluded | Native thinking traces restate the shared prompt, which was guarded as "secret" | Fixed: thinking is recorded but not guarded, and shared text is never secret |
 | Structured judgments (PR #1) | 90% usable vs 97–99% for plain judgments; gate AUPRC looked worse | The larger schema is harder for a ~3B-active model | Left off by default |
 | Provider budget walls | OpenRouter **workspace** cap ($5) returned 403s; a free-tier key returned 402 `in_flight_budget_exhausted` | Account-level limits outside our gateway caps | Harness now refuses to cache or score failed calls (`EvalIncomplete`) and stops refilling slots |

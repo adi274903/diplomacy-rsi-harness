@@ -9,6 +9,16 @@ A self-improvement harness for **reasoning-traced trust decisions**:
 
 No weights are trained; all learning is at the prompt level.
 
+**By the numbers:**
+
+| | |
+|---|---|
+| Self-play games completed with real models | **153** (about 2,800 negotiation messages): 144 on GCP and 9 locally |
+| Player models | 4 similar-size open reasoning models |
+| Game reviews by Opus | **117** |
+| Candidate playbooks tested by the gate | **69**, of which **2** were accepted |
+| Held-out human messages in the one-time test | **1,200** |
+
 **Live demo:** https://34-59-183-174.sslip.io/ui/rsi/ · **Technical report:** [docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md)
 
 ![Live game view](docs/screenshots/live-game.png)
@@ -19,8 +29,8 @@ No weights are trained; all learning is at the prompt level.
 
 | | Result |
 |---|---|
-| **Playbook learned by Opus from human games** (human-v2), on the held-out test set | AUPRC **0.150 → 0.195** (Δ +0.044, 95% CI [+0.016, +0.087]); ECE **0.275 → 0.143**; AUROC **0.73** vs **0.58** for the human receivers |
-| **Self-play refinement** (rsi-v1, written by Opus after reviewing self-play games), on the human gate games | AUPRC **0.107 → 0.142**; lie-F1 **0.072 → 0.152**; accepted with 99% bootstrap confidence |
+| **Playbook learned by Opus from human games** (human-v2), on the held-out test set, with Inkling 2 Mini as receiver | AUPRC **0.150 → 0.195** (Δ +0.044, 95% CI [+0.016, +0.087]); ECE **0.275 → 0.143**; AUROC **0.73** vs **0.58** for the human receivers |
+| **Self-play refinement** (rsi-v1, written by Opus after reviewing self-play games), on the human gate games, judged by Inkling 2 Small | AUPRC **0.107 → 0.142**; lie-F1 **0.072 → 0.152**; accepted with 99% bootstrap confidence |
 | **Vs the paper** (test lie-F1 at a 0.5 cutoff) | **18.4** for us, vs **20.9** (LSTM+Power+BERT), **27.0** (best model) and **22.5** (humans). **Not beaten** on this metric. |
 | **Is it RSI?** | An automated, gated self-improvement loop with an external critic. **Not** strong RSI: the critic never improves itself, and gains flattened after one accepted step. |
 
@@ -104,10 +114,10 @@ sequenceDiagram
 ```
 </details>
 
-- **Players** are four similar-size open reasoning models, rotated across countries every game: Inkling 2 Mini, Qwen3.6-35B-A3B, Gemma 4 26B-A4B and Nemotron 3 Nano 30B-A3B.
+- **Players** are four similar-size open reasoning models, randomly reseated across countries every game: Inkling 2 Mini, Qwen3.6-35B-A3B, Gemma 4 26B-A4B and Nemotron 3 Nano 30B-A3B. The other three countries are uncontrolled.
 - **Isolation:** every prompt is checked so a player only sees its own conversations. A game with any leak is discarded.
-- **Ground truth for deception** is the sender's private label **or** a promise that Opus found broken against the orders actually played.
-- **Human data is evaluation-only:**
+- **Ground truth for deception in self-play** is the sender's private label **or** a promise that Opus found broken against the orders actually played. On human data, it is the human senders' own labels.
+- **Human data has fixed roles**, so no game is both learned from and scored on:
 
   | Games | Use |
   |---|---|
@@ -127,6 +137,8 @@ sequenceDiagram
 | `rsi/continuous.py` | Event-driven continuous RSI loop (used in production) |
 | `rsi/loop.py`, `rsi/cadence.py` | Generation-based and fixed-cadence loops; `final-test` (lock-protected) |
 | `rsi/genome.py`, `rsi/evolve.py`, `rsi/gate.py` | Playbooks, edit lint and voting, candidates, the acceptance gate |
+| `rsi/judge.py`, `rsi/score.py`, `rsi/standings.py` | Receiver-seat judging of human data, metrics and calibration, winners and leaderboards |
+| `rsi/llm.py`, `rsi/prompts.py` | Async client (schema validation, repair, mock backend), cache-friendly prompt layout |
 | `rsi/learn_human.py` | Opus learns a playbook from labelled human games |
 | `rsi/causal.py`, `rsi/decision_graph.py` | Decision-trace graphs; optional structured judgments |
 | `rsi/human_data.py`, `rsi/contamination.py` | Benchmark loader; n-gram dedup, memorisation probe, paraphrase test |
@@ -161,7 +173,7 @@ make run      # full RSI loop on the mock model
 ```
 
 ```bash
-make serve    # dashboard at http://127.0.0.1:8765
+make serve    # dashboard for the mock run at http://127.0.0.1:8765
 ```
 
 ## Running with real models
@@ -182,8 +194,8 @@ Other entry points:
 
 | Command | What it does |
 |---|---|
-| `python -m rsi.learn_human` | Opus learns a playbook from human train games |
-| `python -m rsi.play --power FRANCE --months 12` | Play a game yourself, at `http://127.0.0.1:8770/ui/play/` |
+| `python -m rsi.learn_human --config configs/cadence.yaml` | Opus learns a playbook from human games, with the gate and test games held out |
+| `python -m rsi.play --config configs/cadence.yaml --power FRANCE --months 12` | Play a game yourself, at `http://127.0.0.1:8770/ui/play/`. The default `configs/play.yaml` expects the container's separate play gateway on :9002. |
 | `python -m rsi.loop final-test ... --genome <playbook>` | One-time held-out test evaluation |
 
 **Budget note:** OpenRouter reserves `max_tokens × price` for every in-flight request. Low-credit or workspace-capped keys reject parallel calls (402/403). The harness detects this and stops rather than recording failed calls as results.
