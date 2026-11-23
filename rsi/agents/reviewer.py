@@ -51,7 +51,7 @@ class Reviewer:
         self.effort = effort
         self.chunk = chunk
 
-    async def review_game(self, record: dict, genome: Genome) -> GameReview:
+    async def review_game(self, record: dict, genome: Genome, extra_context: str = "") -> GameReview:
         """`record` is the privileged game record written by `rsi.runner`."""
         msgs = record["messages"]
         sends = {int(k): v for k, v in record["sends"].items()}
@@ -67,6 +67,8 @@ class Reviewer:
                              orders.get(m["phase"], {}).get(m["sender"], []))
                 for m in part)
             user = (f"## Current playbook\n{genome.render_playbook()}\n\n"
+                    + (f"{extra_context}\n\n" if extra_context else "")
+                    + 
                     f"## Game transcript (privileged), messages {start}-{start + len(part) - 1}\n{body}")
             try:
                 review, _ = await self.llm.complete_json(

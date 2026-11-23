@@ -413,6 +413,8 @@ def build_index(run_dir: Path) -> Path:
 def _current_game(run_dir: Path) -> str | None:
     """URL path of the game being played now (else the most recent one), for /live follow mode."""
     games = sorted(run_dir.rglob("game_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # a featured game (game_g00 in cadence runs) keeps /live on ONE game while many run in parallel
+    games.sort(key=lambda p: not p.stem.endswith("g00"))
     for g in games:
         try:
             if json.loads(g.read_text()).get("status") == "running":

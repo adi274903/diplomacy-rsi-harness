@@ -83,7 +83,19 @@ def models_for_next_game(cfg: Config) -> dict[str, str] | None:
     _GAME_COUNTER[0] += 1
     if not pool:
         return None
+    return seat_models(cfg, k)
+
+
+def seat_models(cfg: Config, k: int) -> dict[str, str] | None:
+    """Models for game k: rotated, or a seeded random shuffle (identical for game k across runs/arms)."""
+    pool = cfg.game.model_pool
+    if not pool:
+        return None
     powers = game_powers(cfg.game)
+    if cfg.game.seat_assignment == "random":
+        order = list(pool)
+        random.Random(f"seats:{cfg.loop.seed}:{k}").shuffle(order)
+        return {p: order[i % len(order)] for i, p in enumerate(powers)}
     return {p: pool[(i + k) % len(pool)] for i, p in enumerate(powers)}
 
 

@@ -74,7 +74,11 @@ def _write_json(path: Path, obj) -> None:
 
 async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg: GameConfig,
                    out_dir: str | Path, progress: Callable[[str], None] | None = None,
-                   models: dict[str, str] | None = None) -> dict:
+                   models: dict[str, str] | None = None, season_hook=None,
+                   max_months: int | None = None, players_out: dict | None = None) -> dict:
+    """`season_hook(season_index, record, players)` is awaited after every movement phase resolves
+    (a 6-month season). The cadence experiment uses it to pause games at a barrier, update the
+    playbook, and swap the new genome into `players` before play continues."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -87,6 +91,11 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
     default_model = getattr(getattr(llm, "cfg", None), "model", "mock")
     models = {p: chosen.get(p) or default_model for p in active}
     players = {p: Player(p, seating[p], llm, game_seed=seed, model=chosen.get(p)) for p in active}
+    if players_out is not None:      # lets a coordinator swap in a new playbook while the game runs
+        players_out.update(players)
+    send_genome: dict[int, str] = {}   # playbook version each message / judgment was made under
+    judge_genome: dict[int, str] = {}
+    months, stop_game = 0, False     # game clock: each press round = 3 months, orders end the season
     boards: dict[str, str] = {}
     reasoning: dict[str, dict] = {}       # phase -> power -> private reasoning texts (viewer / causal graph)
     activity: dict[str, str] = {}         # power -> what it is doing right now (live viewer)
@@ -108,6 +117,8 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
             "sends": {m: asdict(r) for m, r in vault.sends.items()},
             "judgments": {m: asdict(r) for m, r in vault.judgments.items()},
             "orders": vault.orders, "boards": boards, "reasoning": reasoning, "activity": dict(activity),
+            "max_months": max_months, "months_played": months,
+            "send_genome": send_genome, "judge_genome": judge_genome,
             "phases": [h["phase"] for h in sc_history] + [env.phase],
             "maps_dir": maps_dir.name if cfg.render_maps else None,
             "leak_hits": vault.leak_hits,
@@ -190,6 +201,7 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                             m = bus.post(phase=phase, season=season, year=year, round=rnd, sender=p,
                                          recipient=to, text=om.text.strip(), sender_sc=sc[p], recipient_sc=sc[to])
                             vault.sends[m.id] = SendRecord(m.id, om.intent, list(turn.plan), turn.analysis)
+                            send_genome[m.id] = players[p].genome.hash
                             vault.bilateral(p, to, m.text, m.id)
                             sent[to].append(m)
                         done(p)
@@ -221,11 +233,19 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                                 m.id, p, j.p_lie, j.decision, j.reasoning, list(j.cues),
                                 meta.reasoning if meta else "", graph=graph,
                                 graph_checks=decision_graph.check(graph, allowed) if graph else None)
+                            judge_genome[m.id] = players[p].genome.hash
                             vault.secret(p, j.reasoning, f"judge:{m.id}")
                         if meta:
                             vault.secret(p, meta.reasoning, f"thinking:{phase}:judge:{rnd}")
                         done(p)
                     checkpoint()
+                    if max_months and rnd == 1:
+                        months += 3
+                        if months >= max_months:   # game ends mid-season: no orders this phase
+                            stop_game = True
+                            break
+                if stop_game:
+                    break
 
             # -- ORDERS -----------------------------------------------------------------------------
             async def do_orders(p: str):
@@ -265,12 +285,21 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
                     (maps_dir / f"{phase}.svg").write_text(svg)
             env.process(submitted)
             sc_history.append({"phase": phase, "sc": env.sc_counts()})
+            if max_months and ptype == "M":
+                months += 3
+                stop_game = months >= max_months
+            if season_hook is not None and ptype == "M":
+                seasons_done = sum(1 for h in sc_history if h["phase"].endswith("M"))
+                checkpoint()
+                await season_hook(seasons_done, record("running"), players)
             new = bus.messages[n_msgs0:]
             lies = [m for m in new if vault.sends[m.id].intent == "deceptive"]
             caught = [m for m in lies if m.id in vault.judgments and vault.judgments[m.id].decision == "distrust"]
             say(f"{phase}: {len(new)} msgs, {len(lies)} lies ({len(caught)} caught) | SC "
                 + " ".join(f"{p[:3]}{n}" for p, n in sorted(env.sc_counts().items()) if p in players))
             checkpoint()
+            if stop_game:
+                break
     except IsolationError as e:
         error = f"isolation: {e}"          # the game is invalid and must not be used for training
     if cfg.render_maps and error is None:

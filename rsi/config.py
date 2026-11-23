@@ -41,6 +41,8 @@ class GameConfig(BaseModel):
     # Rotate these models across the active powers every game (game k: power i plays
     # model_pool[(i + k) % len]), so no model is tied to one country. Overrides power_models.
     model_pool: list[str] = Field(default_factory=list)
+    # rotate: game k shifts the pool by k; random: seeded shuffle per game (same game index -> same seats)
+    seat_assignment: Literal["rotate", "random"] = "rotate"
     press_rounds: int = 2
     max_messages_per_round: int = 2
     end_year: int = 1906

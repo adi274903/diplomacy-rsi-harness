@@ -1,0 +1,42 @@
+# Update-cadence experiment (rsi/cadence.py): Opus judges and rewrites the playbook mid-game; all agents
+# read the updated playbook immediately. Same settings for every arm; only --update-every differs.
+llm:
+  backend: http
+  base_url: http://127.0.0.1:9000/v1
+  model: thinkingmachines/inkling-2-mini      # also the judge for gate / report items
+  effort_mode: openrouter
+  json_mode: none
+  max_connections: 96
+  max_tokens: {send: 4000, judge: 4000, orders: 4000, item_judge: 3000, review: 8000, text: 400}
+  extra_headers: {X-Title: diplomacy-rsi-harness}
+reviewer_llm:
+  backend: http
+  base_url: http://127.0.0.1:9001/v1
+  model: anthropic/claude-opus-5.5
+  effort_mode: none
+  json_mode: none
+  max_connections: 12
+  max_tokens: {review: 8000, item_judge: 3000, text: 400}
+  extra_headers: {X-Title: diplomacy-rsi-harness}
+game:
+  map_name: standard
+  active_powers: [AUSTRIA, FRANCE, GERMANY, ITALY]
+  # four open-weight reasoning MoEs of the same class (25-35B total, 3-4B active), so no model wins on size
+  model_pool:
+    - thinkingmachines/inkling-2-mini
+    - qwen/qwen3.6-35b-a3b
+    - google/gemma-4-26b-a4b-it
+    - nvidia/nemotron-3-nano-30b-a3b
+  seat_assignment: random        # seeded shuffle per game; game i gets the same seats in every arm
+  end_year: 1904                 # 8 seasons: 8 updates (6 months), 4 (1 year), 2 (2 years)
+  press_rounds: 2
+  max_messages_per_round: 2
+  stream_events: true
+loop:
+  initial_genome: playbooks/human_v2.json
+  structured_judgments: false    # check run: structured judgments looked worse on Inkling
+  candidates: 3
+  max_diffs_per_candidate: 3
+  p_gain_min: 0.95               # stricter gate: fewer lucky acceptances
+  ece_tolerance: 0.02
+  bootstrap_n: 1000
