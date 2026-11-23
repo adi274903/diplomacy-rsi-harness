@@ -224,6 +224,8 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
             s["running"].pop(gid, None)
         if rec.get("error"):
             _progress(f"[{gid}] excluded: {rec['error'][:120]}")
+            if str(rec["error"]).startswith("api_failures"):
+                s["api_down"] = True     # budget exhausted / provider down: stop refilling slots
             return rec
         r = game_result(rec)
         _progress(f"[{gid}] finished after {months} months; leader: "
@@ -239,7 +241,9 @@ async def run_pool(cfg: Config, run_dir: Path, n_games: int, batch_messages: int
         out = []
         while True:
             out.append(await one(i))
-            if not forever or (run_dir / "STOP").exists():
+            if not forever or (run_dir / "STOP").exists() or s.get("api_down"):
+                if s.get("api_down"):
+                    st.update(event="model calls are failing (budget cap or provider outage): no new games")
                 return out
             spent = await _spend(cfg)
             if spent >= stop_usd:
@@ -300,6 +304,7 @@ def main() -> None:
     ap.add_argument("--forever", action="store_true", help="keep slots busy until --stop-usd or a STOP file")
     ap.add_argument("--stop-usd", type=float, default=0.0, help="soft budget: no new games once spend reaches it")
     ap.add_argument("--seed-history", default=None, help="dir of past runs whose games Opus reviews first")
+    ap.add_argument("--initial-genome", default=None, help="start from this playbook (overrides the config)")
     ap.add_argument("--seed-max", type=int, default=8)
     ap.add_argument("--mock", action="store_true")
     a = ap.parse_args()
@@ -309,6 +314,8 @@ def main() -> None:
         if cfg.reviewer_llm:
             cfg.reviewer_llm.backend = "mock"
     cfg.llm.run_name = a.run_name
+    if a.initial_genome:
+        cfg.loop.initial_genome = a.initial_genome
     cfg.game.end_year = max(cfg.game.end_year, 1903)    # length is governed by max_months
     run_dir = Path(cfg.paths.runs) / a.run_name
     run_dir.mkdir(parents=True, exist_ok=True)
