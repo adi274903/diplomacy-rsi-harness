@@ -17,6 +17,7 @@
   const $ = (id) => document.getElementById(id);
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
   const pinned = new URLSearchParams(location.search).get('f');
+  const STICKY_AFTER_END_MS = 20000;   // keep a finished game (winner banner) on screen this long
 
   const S = {
     path: null,
@@ -140,7 +141,14 @@
   async function tick() {
     try {
       let path = pinned;
-      if (!path) path = (await getJSON('/api/current')).path;
+      if (!path) {
+        // Sticky: stay on the game being shown while it runs, show its result for a while after it
+        // ends, and only then follow the server to the next game (avoids hopping between parallel games).
+        const st = S.d && S.d.status;
+        if (S.path && st === 'running') path = S.path;
+        else if (S.path && st && Date.now() - (S.endedAt = S.endedAt || Date.now()) < STICKY_AFTER_END_MS) path = S.path;
+        else path = (await getJSON('/api/current')).path;
+      }
       if (path) {
         if (path !== S.path) resetGame(path);
         const d = await getJSON('/api/game?f=' + encodeURIComponent(path));
@@ -181,6 +189,7 @@
 
   function resetGame(path) {
     S.path = path;
+    S.endedAt = 0;
     S.d = null;
     S.phases = [];
     S.sel = null;
