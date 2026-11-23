@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play Diplomacy</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Diplomacy <em>· you vs the models</em></div>
+  <div id="status" class="status">connecting…</div>
+  <button id="theme" class="ghost" aria-label="Toggle theme">◐</button>
+</header>
+<main>
+  <section class="hero">
+    <div>
+      <h1 id="title">Waiting for the game…</h1>
+      <p id="sub" class="muted"></p>
+    </div>
+    <div id="clock" class="clock" hidden></div>
+  </section>
+
+  <section id="action" class="card action" aria-live="polite"></section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Board</h2>
+      <img id="map" alt="Current board" hidden>
+      <p id="nomap" class="muted">The board appears once the first phase starts.</p>
+      <h2>Supply centres</h2>
+      <div id="sc"></div>
+    </section>
+    <section class="card">
+      <h2>Your conversations</h2>
+      <div id="tabs" class="tabs" role="tablist"></div>
+      <div id="thread" class="thread"></div>
+    </section>
+  </div>
+
+  <section id="reveal" class="card" hidden>
+    <h2>After the game: what was really going on</h2>
+    <div id="revealBody"></div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

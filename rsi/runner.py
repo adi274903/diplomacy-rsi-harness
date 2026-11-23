@@ -75,7 +75,8 @@ def _write_json(path: Path, obj) -> None:
 async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg: GameConfig,
                    out_dir: str | Path, progress: Callable[[str], None] | None = None,
                    models: dict[str, str] | None = None, season_hook=None,
-                   max_months: int | None = None, players_out: dict | None = None) -> dict:
+                   max_months: int | None = None, players_out: dict | None = None,
+                   player_overrides: dict | None = None) -> dict:
     """`season_hook(season_index, record, players)` is awaited after every movement phase resolves
     (a 6-month season). The cadence experiment uses it to pause games at a barrier, update the
     playbook, and swap the new genome into `players` before play continues."""
@@ -91,6 +92,9 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
     default_model = getattr(getattr(llm, "cfg", None), "model", "mock")
     models = {p: chosen.get(p) or default_model for p in active}
     players = {p: Player(p, seating[p], llm, game_seed=seed, model=chosen.get(p)) for p in active}
+    for p, seat in (player_overrides or {}).items():   # e.g. a HumanSeat for live play
+        players[p] = seat
+        models[p] = getattr(seat, "model", "override")
     if players_out is not None:      # lets a coordinator swap in a new playbook while the game runs
         players_out.update(players)
     send_genome: dict[int, str] = {}   # playbook version each message / judgment was made under
@@ -162,6 +166,10 @@ async def run_game(game_id: str, seed: int, seating: dict[str, Genome], llm, cfg
             season, year, ptype = env.phase_parts()
             board = prompts.board_block(phase, env.units(), env.centers(), env.last_orders, env.last_phase)
             boards[phase] = board
+            if cfg.render_maps and cfg.render_phase_start:   # current position, before anyone moves
+                svg = await asyncio.to_thread(env.render_svg)
+                if svg:
+                    (maps_dir / f"{phase}_0start.svg").write_text(svg)
             alive = [p for p in env.alive() if p in players]
             sc = env.sc_counts()
             # legal orders are fixed within a phase; computing them once saves engine time per call
