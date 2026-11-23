@@ -3,6 +3,9 @@
 set -euo pipefail
 md() { curl -sf -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1" || true; }
 REPO="$(md rsi-repo)"; RSI_BG="$(md rsi-bg)"; STOP="$(md bg-stop-usd)"; RUN="$(md rsi-run)"; REPLAY="$(md rsi-replay)"
+# 2 GB swap so the image build (Rust compile) fits on small machines such as e2-micro (1 GB RAM)
+if [ ! -f /swapfile ]; then fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null; fi
+grep -q "^/swapfile" /proc/swaps || /sbin/swapon /swapfile
 command -v docker >/dev/null || { apt-get update && apt-get install -y docker.io git; }
 mkdir -p /opt/rsi /var/lib/rsi
 if [ -d /opt/rsi/src/.git ]; then git -C /opt/rsi/src pull --ff-only; else git clone "$REPO" /opt/rsi/src; fi
