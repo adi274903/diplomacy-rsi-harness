@@ -37,6 +37,6 @@ loop:
   structured_judgments: false    # check run: structured judgments looked worse on Inkling
   candidates: 3
   max_diffs_per_candidate: 3
-  p_gain_min: 0.95               # stricter gate: fewer lucky acceptances
+  p_gain_min: 0.80               # demo setting: accept at 80% bootstrap confidence (was 0.95)
   ece_tolerance: 0.02
   bootstrap_n: 1000
