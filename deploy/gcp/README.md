@@ -46,3 +46,14 @@ They can then run `deploy/gcp/tunnel.sh` themselves.
 ## Budgets
 
 **Gateway caps reset when the container restarts**, because they are held in memory. The OpenRouter key's own limit is the hard ceiling across restarts.
+
+## Public access (current setup)
+
+`deploy/gcp/public.sh` reserves the VM's IP, opens 80/443, and runs Caddy with automatic HTTPS on `https://<ip-with-dashes>.sslip.io`:
+
+| Area | Access |
+|---|---|
+| `/ui/game/`, `/ui/rsi/`, `/live`, `/api/*` | Public, read-only. No model calls are triggered from here. |
+| `/ui/play/`, `/api/play/*` | Basic auth. User `demo`, password in the local `./.demo-password` (gitignored). |
+
+Live deployment: https://34-59-183-174.sslip.io/ui/rsi/
